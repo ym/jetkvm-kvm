@@ -26,6 +26,7 @@ import LocalAuthPasswordDialog from "@/components/LocalAuthPasswordDialog";
 import { LocalDevice } from "@routes/devices.$id";
 import { useRevalidator } from "react-router-dom";
 import { ShieldCheckIcon } from "@heroicons/react/20/solid";
+import { CLOUD_APP, SIGNAL_API } from "@/ui.config";
 
 export function SettingsItem({
   title,
@@ -366,7 +367,7 @@ export default function SettingsSidebar() {
   const getDevice = useCallback(async () => {
     try {
       const status = await api
-        .GET(`${import.meta.env.VITE_SIGNAL_API}/device`)
+        .GET(`${SIGNAL_API}/device`)
         .then(res => res.json() as Promise<LocalDevice>);
       setLocalDevice(status);
     } catch (error) {
@@ -677,7 +678,7 @@ export default function SettingsSidebar() {
                 <div>
                   <LinkButton
                     to={
-                      import.meta.env.VITE_CLOUD_APP +
+                      CLOUD_APP +
                       "/signup?deviceId=" +
                       deviceId +
                       `&returnTo=${location.href}adopt`
