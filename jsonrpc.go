@@ -34,6 +34,12 @@ type JSONRPCEvent struct {
 	Params  interface{} `json:"params,omitempty"`
 }
 
+type BacklightSettings struct {
+	MaxBrightness int `json:"max_brightness"`
+	DimAfter      int `json:"dim_after"`
+	OffAfter      int `json:"off_after"`
+}
+
 func writeJSONRPCResponse(response JSONRPCResponse, session *Session) {
 	responseBytes, err := json.Marshal(response)
 	if err != nil {
@@ -225,6 +231,56 @@ func rpcTryUpdate() error {
 	return nil
 }
 
+func rpcSetBacklightSettings(params BacklightSettings) error {
+	LoadConfig()
+
+	blConfig := params
+
+	// NOTE: by default, the frontend limits the brightness to 64, as that's what the device originally shipped with.
+	if blConfig.MaxBrightness > 255 || blConfig.MaxBrightness < 0 {
+		return fmt.Errorf("maxBrightness must be between 0 and 255")
+	}
+
+	if blConfig.DimAfter < 0 {
+		return fmt.Errorf("dimAfter must be a positive integer")
+	}
+
+	if blConfig.OffAfter < 0 {
+		return fmt.Errorf("offAfter must be a positive integer")
+	}
+
+	config.DisplayMaxBrightness = blConfig.MaxBrightness
+	config.DisplayDimAfterSec = blConfig.DimAfter
+	config.DisplayOffAfterSec = blConfig.OffAfter
+
+	if err := SaveConfig(); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	log.Printf("rpc: display: settings applied, max_brightness: %d, dim after: %ds, off after: %ds", config.DisplayMaxBrightness, config.DisplayDimAfterSec, config.DisplayOffAfterSec)
+
+	// If the device started up with auto-dim and/or auto-off set to zero, the display init
+	// method will not have started the tickers. So in case that has changed, attempt to start the tickers now.
+	startBacklightTickers()
+
+	// Wake the display after the settings are altered, this ensures the tickers
+	// are reset to the new settings, and will bring the display up to maxBrightness.
+	// Calling with force set to true, to ignore the current state of the display, and force
+	// it to reset the tickers.
+	wakeDisplay(true)
+	return nil
+}
+
+func rpcGetBacklightSettings() (*BacklightSettings, error) {
+	LoadConfig()
+
+	return &BacklightSettings{
+		MaxBrightness: config.DisplayMaxBrightness,
+		DimAfter:      int(config.DisplayDimAfterSec),
+		OffAfter:      int(config.DisplayOffAfterSec),
+	}, nil
+}
+
 const (
 	devModeFile = "/userdata/jetkvm/devmode.enable"
 	sshKeyDir   = "/userdata/dropbear/.ssh"
@@ -385,7 +441,7 @@ func callRPCHandler(handler RPCHandler, params map[string]interface{}) (interfac
 				}
 				args[i] = reflect.ValueOf(newStruct).Elem()
 			} else {
-				return nil, fmt.Errorf("invalid parameter type for: %s", paramName)
+				return nil, fmt.Errorf("invalid parameter type for: %s, type: %s", paramName, paramType.Kind())
 			}
 		} else {
 			args[i] = convertedValue.Convert(paramType)
@@ -560,4 +616,6 @@ var rpcHandlers = map[string]RPCHandler{
 	"getWakeOnLanDevices":    {Func: rpcGetWakeOnLanDevices},
 	"setWakeOnLanDevices":    {Func: rpcSetWakeOnLanDevices, Params: []string{"params"}},
 	"resetConfig":            {Func: rpcResetConfig},
+	"setBacklightSettings":   {Func: rpcSetBacklightSettings, Params: []string{"params"}},
+	"getBacklightSettings":   {Func: rpcGetBacklightSettings},
 }

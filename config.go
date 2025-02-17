@@ -12,24 +12,30 @@ type WakeOnLanDevice struct {
 }
 
 type Config struct {
-	CloudURL          string            `json:"cloud_url"`
-	CloudToken        string            `json:"cloud_token"`
-	GoogleIdentity    string            `json:"google_identity"`
-	JigglerEnabled    bool              `json:"jiggler_enabled"`
-	AutoUpdateEnabled bool              `json:"auto_update_enabled"`
-	IncludePreRelease bool              `json:"include_pre_release"`
-	HashedPassword    string            `json:"hashed_password"`
-	LocalAuthToken    string            `json:"local_auth_token"`
-	LocalAuthMode     string            `json:"localAuthMode"` //TODO: fix it with migration
-	WakeOnLanDevices  []WakeOnLanDevice `json:"wake_on_lan_devices"`
+	CloudURL             string            `json:"cloud_url"`
+	CloudToken           string            `json:"cloud_token"`
+	GoogleIdentity       string            `json:"google_identity"`
+	JigglerEnabled       bool              `json:"jiggler_enabled"`
+	AutoUpdateEnabled    bool              `json:"auto_update_enabled"`
+	IncludePreRelease    bool              `json:"include_pre_release"`
+	HashedPassword       string            `json:"hashed_password"`
+	LocalAuthToken       string            `json:"local_auth_token"`
+	LocalAuthMode        string            `json:"localAuthMode"` //TODO: fix it with migration
+	WakeOnLanDevices     []WakeOnLanDevice `json:"wake_on_lan_devices"`
 	EdidString        string            `json:"hdmi_edid_string"`
+  DisplayMaxBrightness int               `json:"display_max_brightness"`
+	DisplayDimAfterSec   int               `json:"display_dim_after_sec"`
+	DisplayOffAfterSec   int               `json:"display_off_after_sec"`
 }
 
 const configPath = "/userdata/kvm_config.json"
 
 var defaultConfig = &Config{
-	CloudURL:          "https://api.jetkvm.com",
-	AutoUpdateEnabled: true, // Set a default value
+	CloudURL:             "https://api.jetkvm.com",
+	AutoUpdateEnabled:    true, // Set a default value
+	DisplayMaxBrightness: 64,
+	DisplayDimAfterSec:   120,  // 2 minutes
+	DisplayOffAfterSec:   1800, // 30 minutes
 }
 
 var config *Config
