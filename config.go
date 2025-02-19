@@ -55,6 +55,9 @@ func LoadConfig() {
 		return
 	}
 
+	// load the default config
+	config = defaultConfig
+
 	file, err := os.Open(configPath)
 	if err != nil {
 		logger.Debug("default config file doesn't exist, using default")
