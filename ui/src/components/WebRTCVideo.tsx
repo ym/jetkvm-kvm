@@ -17,6 +17,16 @@ import useKeyboard from "@/hooks/useKeyboard";
 import { useJsonRpc } from "@/hooks/useJsonRpc";
 import { ConnectionErrorOverlay, HDMIErrorOverlay, LoadingOverlay } from "./VideoOverlay";
 
+declare global {
+  interface Navigator {
+    readonly keyboard?: {
+      lock: (keyCodes?: string[]) => Promise<void>;
+      unlock: () => Promise<void>;
+    };
+  }
+}
+
+
 export default function WebRTCVideo() {
   // Video and stream related refs and states
   const videoElm = useRef<HTMLVideoElement>(null);
@@ -90,15 +100,22 @@ export default function WebRTCVideo() {
     [setVideoClientSize, updateVideoSizeStore, setVideoSize],
   );
 
+  const calcDelta = (pos: number) => Math.abs(pos) < 10 ? pos * 2 : pos;
+
   // Mouse-related
   const sendMouseMovement = useCallback(
-    (x: number, y: number, buttons: number) => {
-      send("absMouseReport", { x, y, buttons });
+    async (x: number, y: number, buttons: number) => {
+      if (settings.mouseMode === "relative") {
+        if (x === 0 && y === 0 && buttons === 0) return;
+        send("relMouseReport", { dx: calcDelta(x), dy: calcDelta(y), buttons });
+      } else if (settings.mouseMode === "absolute") {
+        send("absMouseReport", { x, y, buttons });
+      }
 
       // We set that for the debug info bar
       setMousePosition(x, y);
     },
-    [send, setMousePosition],
+    [send, setMousePosition, settings.mouseMode],
   );
 
   const mouseMoveHandler = useCallback(
@@ -138,9 +155,15 @@ export default function WebRTCVideo() {
 
       // Send mouse movement
       const { buttons } = e;
+
+      // Relative
+      if (settings.mouseMode === "relative") {
+        sendMouseMovement(e.movementX, e.movementY, buttons);
+        return;
+      }
       sendMouseMovement(x, y, buttons);
     },
-    [sendMouseMovement, videoClientHeight, videoClientWidth, videoWidth, videoHeight],
+    [sendMouseMovement, videoClientHeight, videoClientWidth, videoWidth, videoHeight, settings.mouseMode],
   );
 
   const mouseWheelHandler = useCallback(
@@ -422,17 +445,35 @@ export default function WebRTCVideo() {
     }, 300);
   }, [sendKeyboardEvent, setDisableVideoFocusTrap, sidebarView]);
 
+
+  document.addEventListener("fullscreenchange", async () => {
+    if (!document.fullscreenElement) {
+      await navigator.keyboard?.unlock();
+    }
+  });
+
+
+  const requestFullscreen = async () => {
+    if (!videoElm.current) return;
+
+    await videoElm.current.requestFullscreen();
+
+    // request keyboard lock permission
+    const keyboardLockPermission = 'keyboard-lock' as PermissionName;
+    const { state } = await navigator.permissions.query({ name: keyboardLockPermission });
+    if (state !== "granted") {
+      console.error("Keyboard lock permission not granted");
+      return;
+    }
+
+    await navigator.keyboard?.lock();
+  };
+
   return (
     <div className="grid h-full w-full grid-rows-layout">
       <div className="min-h-[39.5px]">
         <fieldset disabled={peerConnectionState !== "connected"}>
-          <Actionbar
-            requestFullscreen={async () =>
-              videoElm.current?.requestFullscreen({
-                navigationUI: "show",
-              })
-            }
-          />
+          <Actionbar requestFullscreen={requestFullscreen} />
         </fieldset>
       </div>
 

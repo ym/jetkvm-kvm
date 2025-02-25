@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import type { JsonRpcError } from "./useJsonRpc";
 
 // Utility function to append stats to a Map
 const appendStatToMap = <T extends { timestamp: number }>(
@@ -134,6 +135,10 @@ interface RTCState {
 
   terminalChannel: RTCDataChannel | null;
   setTerminalChannel: (channel: RTCDataChannel) => void;
+
+  lastError?: Error | JsonRpcError;
+  setLastError: (error: Error | JsonRpcError | undefined) => void;
+  clearLastError: () => void;
 }
 
 export const useRTCStore = create<RTCState>(set => ({
@@ -202,18 +207,56 @@ export const useRTCStore = create<RTCState>(set => ({
   // Add these new properties to the store implementation
   terminalChannel: null,
   setTerminalChannel: channel => set({ terminalChannel: channel }),
+
+  // log errors
+  lastError: undefined,
+  setLastError: error => set({ lastError: error }),
+  clearLastError: () => set({ lastError: undefined }),
 }));
+
+
+interface MousePosition {
+  x: number;
+  y: number;
+}
 
 interface MouseState {
   mouseX: number;
   mouseY: number;
+  mousePositionDeltas: MousePosition[];
   setMousePosition: (x: number, y: number) => void;
+  clearMousePositionDeltas: () => void;
+  setAndGetRelativeMousePosition: (x: number, y: number) => MousePosition | undefined;
 }
 
 export const useMouseStore = create<MouseState>(set => ({
   mouseX: 0,
   mouseY: 0,
+  mousePositionDeltas: [],
   setMousePosition: (x, y) => set({ mouseX: x, mouseY: y }),
+  clearMousePositionDeltas: () => set({ mousePositionDeltas: [] }),
+
+  setAndGetRelativeMousePosition: (x, y) => {
+    let relativePosition: MousePosition | undefined;
+
+    set(state => {
+      const { mousePositionDeltas } = state;
+      mousePositionDeltas.push({ x, y });
+      if (mousePositionDeltas.length >= 2) {
+        const lastPosition = mousePositionDeltas[mousePositionDeltas.length - 1];
+        const firstPosition = mousePositionDeltas[0];
+        const deltaX = lastPosition.x - firstPosition.x;
+        const deltaY = lastPosition.y - firstPosition.y;
+        relativePosition = { x: deltaX, y: deltaY };
+
+        console.log("Relative position", relativePosition, mousePositionDeltas);
+      }
+
+      return { ...state, mousePositionDeltas };
+    });
+
+    return relativePosition;
+  },
 }));
 
 export interface VideoState {
@@ -477,12 +520,12 @@ export interface UpdateState {
   setOtaState: (state: UpdateState["otaState"]) => void;
   setUpdateDialogHasBeenMinimized: (hasBeenMinimized: boolean) => void;
   modalView:
-    | "loading"
-    | "updating"
-    | "upToDate"
-    | "updateAvailable"
-    | "updateCompleted"
-    | "error";
+  | "loading"
+  | "updating"
+  | "upToDate"
+  | "updateAvailable"
+  | "updateCompleted"
+  | "error";
   setModalView: (view: UpdateState["modalView"]) => void;
   isUpdateDialogOpen: boolean;
   setIsUpdateDialogOpen: (isOpen: boolean) => void;
@@ -528,12 +571,12 @@ export const useUpdateStore = create<UpdateState>(set => ({
 
 interface LocalAuthModalState {
   modalView:
-    | "createPassword"
-    | "deletePassword"
-    | "updatePassword"
-    | "creationSuccess"
-    | "deleteSuccess"
-    | "updateSuccess";
+  | "createPassword"
+  | "deletePassword"
+  | "updatePassword"
+  | "creationSuccess"
+  | "deleteSuccess"
+  | "updateSuccess";
   errorMessage: string | null;
   setModalView: (view: LocalAuthModalState["modalView"]) => void;
   setErrorMessage: (message: string | null) => void;

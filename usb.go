@@ -1,6 +1,7 @@
 package kvm
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log"
@@ -22,6 +23,11 @@ const configC1Path = "/sys/kernel/config/usb_gadget/jetkvm/configs/c.1"
 
 func mountConfigFS() error {
 	_, err := os.Stat(gadgetPath)
+	// TODO: check if it's mounted properly
+	if err == nil {
+		return nil
+	}
+
 	if os.IsNotExist(err) {
 		err = exec.Command("mount", "-t", "configfs", "none", configFSPath).Run()
 		if err != nil {
@@ -43,8 +49,7 @@ func init() {
 	udc = udcs[0]
 	_, err := os.Stat(kvmGadgetPath)
 	if err == nil {
-		logger.Info("usb gadget already exists, skipping usb gadget initialization")
-		return
+		logger.Info("usb gadget already exists")
 	}
 	err = mountConfigFS()
 	if err != nil {
@@ -58,14 +63,227 @@ func init() {
 	//TODO: read hid reports(capslock, numlock, etc) from keyboardHidFile
 }
 
+func writeIfDifferent(filePath string, content []byte, permMode os.FileMode) error {
+	if _, err := os.Stat(filePath); err == nil {
+		oldContent, err := os.ReadFile(filePath)
+		if err == nil {
+			if bytes.Equal(oldContent, content) {
+				logger.Tracef("skipping writing to %s as it already has the correct content", filePath)
+				return nil
+			}
+
+			if len(oldContent) == len(content)+1 &&
+				bytes.Equal(oldContent[:len(content)], content) &&
+				oldContent[len(content)] == 10 {
+				logger.Tracef("skipping writing to %s as it already has the correct content", filePath)
+				return nil
+			}
+
+			logger.Tracef("writing to %s as it has different content %v %v", filePath, oldContent, content)
+		}
+	}
+	return os.WriteFile(filePath, content, permMode)
+}
+
 func writeGadgetAttrs(basePath string, attrs [][]string) error {
 	for _, item := range attrs {
 		filePath := filepath.Join(basePath, item[0])
-		err := os.WriteFile(filePath, []byte(item[1]), 0644)
+		err := writeIfDifferent(filePath, []byte(item[1]), 0644)
 		if err != nil {
 			return fmt.Errorf("failed to write to %s: %w", filePath, err)
 		}
 	}
+	return nil
+}
+
+func writeHIDGadget(funcName string, attrs [][]string, reportDesc []byte) (string, error) {
+	// create hid path
+	hidPath := path.Join(kvmGadgetPath, "functions", funcName)
+	if _, err := os.Stat(hidPath); err == nil {
+		logger.Infof("hid path %s already exists, skipping hid initialization", hidPath)
+		return hidPath, nil
+	}
+
+	err := os.MkdirAll(hidPath, 0755)
+	if err != nil {
+		return "", fmt.Errorf("failed to create hid path: %w", err)
+	}
+
+	// write hid attributes
+	err = writeGadgetAttrs(hidPath, attrs)
+	if err != nil {
+		return "", fmt.Errorf("failed to write hid attributes: %w", err)
+	}
+
+	// write report descriptor
+	err = writeIfDifferent(path.Join(hidPath, "report_desc"), reportDesc, 0644)
+	if err != nil {
+		return "", err
+	}
+
+	return hidPath, nil
+}
+
+type gadgetConfigItem struct {
+	path        []string
+	attrs       [][]string
+	configAttrs [][]string
+	configPath  string
+	reportDesc  []byte
+
+	children []gadgetConfigItem
+}
+
+var gadgetConfig = []gadgetConfigItem{
+	{
+		attrs: [][]string{
+			{"bcdUSB", "0x0200"},   //USB 2.0
+			{"idVendor", "0x1d6b"}, //The Linux Foundation
+			{"idProduct", "0104"},  //Multifunction Composite Gadget¬
+			{"bcdDevice", "0100"},
+		},
+		configAttrs: [][]string{
+			{"MaxPower", "250"}, //in unit of 2mA
+		},
+		children: []gadgetConfigItem{
+			{
+				path: []string{"strings", "0x409"},
+				attrs: [][]string{
+					{"serialnumber", GetDeviceID()},
+					{"manufacturer", "JetKVM"},
+					{"product", "JetKVM USB Emulation Device"},
+				},
+				configAttrs: [][]string{
+					{"configuration", "Config 1: HID"},
+				},
+			},
+			// keyboard HID
+			{
+				path:       []string{"functions", "hid.usb0"},
+				configPath: path.Join(configC1Path, "hid.usb0"),
+				attrs: [][]string{
+					{"protocol", "1"},
+					{"subclass", "1"},
+					{"report_length", "8"},
+				},
+				reportDesc: KeyboardReportDesc,
+			},
+			// mouse HID
+			{
+				path:       []string{"functions", "hid.usb1"},
+				configPath: path.Join(configC1Path, "hid.usb1"),
+				attrs: [][]string{
+					{"protocol", "2"},
+					{"subclass", "1"},
+					{"report_length", "6"},
+				},
+				reportDesc: CombinedMouseReportDesc,
+			},
+			// relative mouse HID
+			{
+				path:       []string{"functions", "hid.usb2"},
+				configPath: path.Join(configC1Path, "hid.usb2"),
+				attrs: [][]string{
+					{"protocol", "2"},
+					{"subclass", "1"},
+					{"report_length", "4"},
+				},
+				reportDesc: CombinedRelativeMouseReportDesc,
+			},
+			// mass storage
+			{
+				path:       []string{"functions", "mass_storage.usb0"},
+				configPath: path.Join(configC1Path, "mass_storage.usb0"),
+				attrs: [][]string{
+					{"stall", "1"},
+				},
+				children: []gadgetConfigItem{
+					{
+						path: []string{"lun.0"},
+						attrs: [][]string{
+							{"cdrom", "1"},
+							{"ro", "1"},
+							{"removable", "1"},
+							{"file", "\n"},
+							{"inquiry_string", "JetKVM Virtual Media"},
+						},
+					},
+				},
+			},
+		},
+	},
+}
+
+func writeGadgetItemConfig(items []gadgetConfigItem) error {
+	for _, item := range items {
+		// create directory for the item
+		gadgetItemPathArr := append([]string{kvmGadgetPath}, item.path...)
+		gadgetItemPath := filepath.Join(gadgetItemPathArr...)
+		err := os.MkdirAll(gadgetItemPath, 0755)
+		if err != nil {
+			return fmt.Errorf("failed to create path %s: %w", gadgetItemPath, err)
+		}
+
+		if len(item.configAttrs) > 0 {
+			configItemPathArr := append([]string{configC1Path}, item.path...)
+			configItemPath := filepath.Join(configItemPathArr...)
+			err = os.MkdirAll(configItemPath, 0755)
+			if err != nil {
+				return fmt.Errorf("failed to create path %s: %w", config, err)
+			}
+
+			err = writeGadgetAttrs(configItemPath, item.configAttrs)
+			if err != nil {
+				return fmt.Errorf("failed to write config attributes for %s: %w", configItemPath, err)
+			}
+		}
+
+		if len(item.attrs) > 0 {
+			// write attributes for the item
+			err = writeGadgetAttrs(gadgetItemPath, item.attrs)
+			if err != nil {
+				return fmt.Errorf("failed to write attributes for %s: %w", gadgetItemPath, err)
+			}
+		}
+
+		// write report descriptor if available
+		if item.reportDesc != nil {
+			err = writeIfDifferent(path.Join(gadgetItemPath, "report_desc"), item.reportDesc, 0644)
+			if err != nil {
+				return err
+			}
+		}
+
+		// write children
+		err = writeGadgetItemConfig(item.children)
+		if err != nil {
+			return err
+		}
+
+		// create symlink if configPath is set
+		if item.configPath != "" {
+			logger.Tracef("Creating symlink from %s to %s", item.configPath, gadgetItemPath)
+
+			// check if the symlink already exists, if yes, check if it points to the correct path
+			if _, err := os.Lstat(item.configPath); err == nil {
+				linkPath, err := os.Readlink(item.configPath)
+				if err != nil || linkPath != gadgetItemPath {
+					err = os.Remove(item.configPath)
+					if err != nil {
+						return fmt.Errorf("failed to remove existing symlink %s: %w", item.configPath, err)
+					}
+				}
+			} else if !os.IsNotExist(err) {
+				return fmt.Errorf("failed to check if symlink exists: %w", err)
+			}
+
+			err = os.Symlink(gadgetItemPath, item.configPath)
+			if err != nil {
+				return fmt.Errorf("failed to create symlink from %s to %s: %w", item.configPath, gadgetItemPath, err)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -79,133 +297,11 @@ func writeGadgetConfig() error {
 		return err
 	}
 
-	err = writeGadgetAttrs(kvmGadgetPath, [][]string{
-		{"bcdUSB", "0x0200"},   //USB 2.0
-		{"idVendor", "0x1d6b"}, //The Linux Foundation
-		{"idProduct", "0104"},  //Multifunction Composite Gadget¬
-		{"bcdDevice", "0100"},
-	})
-	if err != nil {
-		return err
-	}
-
-	gadgetStringsPath := filepath.Join(kvmGadgetPath, "strings", "0x409")
-	err = os.MkdirAll(gadgetStringsPath, 0755)
-	if err != nil {
-		return err
-	}
-
-	err = writeGadgetAttrs(gadgetStringsPath, [][]string{
-		{"serialnumber", GetDeviceID()},
-		{"manufacturer", "JetKVM"},
-		{"product", "JetKVM USB Emulation Device"},
-	})
-	if err != nil {
-		return err
-	}
-
-	configC1StringsPath := path.Join(configC1Path, "strings", "0x409")
-	err = os.MkdirAll(configC1StringsPath, 0755)
-	if err != nil {
-		return err
-	}
-
-	err = writeGadgetAttrs(configC1Path, [][]string{
-		{"MaxPower", "250"}, //in unit of 2mA
-	})
-	if err != nil {
-		return err
-	}
-
-	err = writeGadgetAttrs(configC1StringsPath, [][]string{
-		{"configuration", "Config 1: HID"},
-	})
-	if err != nil {
-		return err
-	}
-
-	//keyboard HID
-	hid0Path := path.Join(kvmGadgetPath, "functions", "hid.usb0")
-	err = os.MkdirAll(hid0Path, 0755)
-	if err != nil {
-		return err
-	}
-	err = writeGadgetAttrs(hid0Path, [][]string{
-		{"protocol", "1"},
-		{"subclass", "1"},
-		{"report_length", "8"},
-	})
-	if err != nil {
-		return err
-	}
-
-	err = os.WriteFile(path.Join(hid0Path, "report_desc"), KeyboardReportDesc, 0644)
-	if err != nil {
-		return err
-	}
-
-	//mouse HID
-	hid1Path := path.Join(kvmGadgetPath, "functions", "hid.usb1")
-	err = os.MkdirAll(hid1Path, 0755)
-	if err != nil {
-		return err
-	}
-	err = writeGadgetAttrs(hid1Path, [][]string{
-		{"protocol", "2"},
-		{"subclass", "1"},
-		{"report_length", "6"},
-	})
-	if err != nil {
-		return err
-	}
-
-	err = os.WriteFile(path.Join(hid1Path, "report_desc"), CombinedMouseReportDesc, 0644)
-	if err != nil {
-		return err
-	}
-	//mass storage
-	massStoragePath := path.Join(kvmGadgetPath, "functions", "mass_storage.usb0")
-	err = os.MkdirAll(massStoragePath, 0755)
-	if err != nil {
-		return err
-	}
-
-	err = writeGadgetAttrs(massStoragePath, [][]string{
-		{"stall", "1"},
-	})
-	if err != nil {
-		return err
-	}
-	lun0Path := path.Join(massStoragePath, "lun.0")
-	err = os.MkdirAll(lun0Path, 0755)
-	if err != nil {
-		return err
-	}
-	err = writeGadgetAttrs(lun0Path, [][]string{
-		{"cdrom", "1"},
-		{"ro", "1"},
-		{"removable", "1"},
-		{"file", "\n"},
-		{"inquiry_string", "JetKVM Virtual Media"},
-	})
-	if err != nil {
-		return err
-	}
-
-	err = os.Symlink(hid0Path, path.Join(configC1Path, "hid.usb0"))
-	if err != nil {
-		return err
-	}
-
-	err = os.Symlink(hid1Path, path.Join(configC1Path, "hid.usb1"))
-	if err != nil {
-		return err
-	}
-
-	err = os.Symlink(massStoragePath, path.Join(configC1Path, "mass_storage.usb0"))
-	if err != nil {
-		return err
-	}
+	logger.Tracef("writing gadget config")
+	err = writeGadgetItemConfig(gadgetConfig)
+	// if err != nil {
+	// 	return err
+	// }
 
 	err = os.WriteFile(path.Join(kvmGadgetPath, "UDC"), []byte(udc), 0644)
 	if err != nil {
@@ -227,10 +323,14 @@ func rebindUsb() error {
 	return nil
 }
 
-var keyboardHidFile *os.File
-var keyboardLock = sync.Mutex{}
-var mouseHidFile *os.File
-var mouseLock = sync.Mutex{}
+var (
+	keyboardHidFile *os.File
+	keyboardLock    = sync.Mutex{}
+	mouseHidFile    *os.File
+	mouseLock       = sync.Mutex{}
+	relMouseHidFile *os.File
+	relMouseLock    = sync.Mutex{}
+)
 
 func rpcKeyboardReport(modifier uint8, keys []uint8) error {
 	keyboardLock.Lock()
@@ -314,6 +414,32 @@ func rpcWheelReport(wheelY int8) error {
 	return nil
 }
 
+func rpcRelMouseReport(x, y int8, buttons uint8) error {
+	relMouseLock.Lock()
+	defer relMouseLock.Unlock()
+	if relMouseHidFile == nil {
+		var err error
+		relMouseHidFile, err = os.OpenFile("/dev/hidg2", os.O_RDWR, 0666)
+		if err != nil {
+			return fmt.Errorf("failed to open hidg2: %w", err)
+		}
+	}
+	resetUserInputTime()
+	_, err := relMouseHidFile.Write([]byte{
+		buttons,  // Buttons
+		uint8(x), // X
+		uint8(y), // Y
+		0,        // Wheel
+	})
+	if err != nil {
+		logger.Errorf("failed to write to hidg2: %v", err)
+		relMouseHidFile.Close()
+		relMouseHidFile = nil
+		return err
+	}
+	return nil
+}
+
 // Helper function to get absolute value of float64
 func abs(x float64) float64 {
 	if x < 0 {
@@ -361,38 +487,38 @@ func init() {
 
 // Source: https://www.kernel.org/doc/Documentation/usb/gadget_hid.txt
 var KeyboardReportDesc = []byte{
-	0x05, 0x01, /* USAGE_PAGE (Generic Desktop)	          */
-	0x09, 0x06, /* USAGE (Keyboard)                       */
-	0xa1, 0x01, /* COLLECTION (Application)               */
-	0x05, 0x07, /*   USAGE_PAGE (Keyboard)                */
-	0x19, 0xe0, /*   USAGE_MINIMUM (Keyboard LeftControl) */
-	0x29, 0xe7, /*   USAGE_MAXIMUM (Keyboard Right GUI)   */
-	0x15, 0x00, /*   LOGICAL_MINIMUM (0)                  */
-	0x25, 0x01, /*   LOGICAL_MAXIMUM (1)                  */
-	0x75, 0x01, /*   REPORT_SIZE (1)                      */
-	0x95, 0x08, /*   REPORT_COUNT (8)                     */
-	0x81, 0x02, /*   INPUT (Data,Var,Abs)                 */
-	0x95, 0x01, /*   REPORT_COUNT (1)                     */
-	0x75, 0x08, /*   REPORT_SIZE (8)                      */
-	0x81, 0x03, /*   INPUT (Cnst,Var,Abs)                 */
-	0x95, 0x05, /*   REPORT_COUNT (5)                     */
-	0x75, 0x01, /*   REPORT_SIZE (1)                      */
-	0x05, 0x08, /*   USAGE_PAGE (LEDs)                    */
-	0x19, 0x01, /*   USAGE_MINIMUM (Num Lock)             */
-	0x29, 0x05, /*   USAGE_MAXIMUM (Kana)                 */
-	0x91, 0x02, /*   OUTPUT (Data,Var,Abs)                */
-	0x95, 0x01, /*   REPORT_COUNT (1)                     */
-	0x75, 0x03, /*   REPORT_SIZE (3)                      */
-	0x91, 0x03, /*   OUTPUT (Cnst,Var,Abs)                */
-	0x95, 0x06, /*   REPORT_COUNT (6)                     */
-	0x75, 0x08, /*   REPORT_SIZE (8)                      */
-	0x15, 0x00, /*   LOGICAL_MINIMUM (0)                  */
-	0x25, 0x65, /*   LOGICAL_MAXIMUM (101)                */
-	0x05, 0x07, /*   USAGE_PAGE (Keyboard)                */
-	0x19, 0x00, /*   USAGE_MINIMUM (Reserved)             */
-	0x29, 0x65, /*   USAGE_MAXIMUM (Keyboard Application) */
-	0x81, 0x00, /*   INPUT (Data,Ary,Abs)                 */
-	0xc0, /* END_COLLECTION                         */
+	0x05, 0x01, // USAGE_PAGE (Generic Desktop)
+	0x09, 0x06, // USAGE (Keyboard)
+	0xa1, 0x01, // COLLECTION (Application)
+	0x05, 0x07, //   USAGE_PAGE (Keyboard)
+	0x19, 0xe0, //   USAGE_MINIMUM (Keyboard LeftControl)
+	0x29, 0xe7, //   USAGE_MAXIMUM (Keyboard Right GUI)
+	0x15, 0x00, //   LOGICAL_MINIMUM (0)
+	0x25, 0x01, //   LOGICAL_MAXIMUM (1)
+	0x75, 0x01, //   REPORT_SIZE (1)
+	0x95, 0x08, //   REPORT_COUNT (8)
+	0x81, 0x02, //   INPUT (Data,Var,Abs)
+	0x95, 0x01, //   REPORT_COUNT (1)
+	0x75, 0x08, //   REPORT_SIZE (8)
+	0x81, 0x03, //   INPUT (Cnst,Var,Abs)
+	0x95, 0x05, //   REPORT_COUNT (5)
+	0x75, 0x01, //   REPORT_SIZE (1)
+	0x05, 0x08, //   USAGE_PAGE (LEDs)
+	0x19, 0x01, //   USAGE_MINIMUM (Num Lock)
+	0x29, 0x05, //   USAGE_MAXIMUM (Kana)
+	0x91, 0x02, //   OUTPUT (Data,Var,Abs)
+	0x95, 0x01, //   REPORT_COUNT (1)
+	0x75, 0x03, //   REPORT_SIZE (3)
+	0x91, 0x03, //   OUTPUT (Cnst,Var,Abs)
+	0x95, 0x06, //   REPORT_COUNT (6)
+	0x75, 0x08, //   REPORT_SIZE (8)
+	0x15, 0x00, //   LOGICAL_MINIMUM (0)
+	0x25, 0x65, //   LOGICAL_MAXIMUM (101)
+	0x05, 0x07, //   USAGE_PAGE (Keyboard)
+	0x19, 0x00, //   USAGE_MINIMUM (Reserved)
+	0x29, 0x65, //   USAGE_MAXIMUM (Keyboard Application)
+	0x81, 0x00, //   INPUT (Data,Ary,Abs)
+	0xc0, // END_COLLECTION
 }
 
 // Combined absolute and relative mouse report descriptor with report ID
@@ -438,4 +564,40 @@ var CombinedMouseReportDesc = []byte{
 	0x81, 0x06, //     Input (Data, Var, Rel)
 
 	0xC0, // End Collection
+}
+
+var CombinedRelativeMouseReportDesc = []byte{
+	// from: https://github.com/NicoHood/HID/blob/b16be57caef4295c6cd382a7e4c64db5073647f7/src/SingleReport/BootMouse.cpp#L26
+	0x05, 0x01, // USAGE_PAGE (Generic Desktop)	  54
+	0x09, 0x02, // USAGE (Mouse)
+	0xa1, 0x01, // COLLECTION (Application)
+
+	// Pointer and Physical are required by Apple Recovery
+	0x09, 0x01, // USAGE (Pointer)
+	0xa1, 0x00, // COLLECTION (Physical)
+
+	// 8 Buttons
+	0x05, 0x09, // USAGE_PAGE (Button)
+	0x19, 0x01, // USAGE_MINIMUM (Button 1)
+	0x29, 0x08, // USAGE_MAXIMUM (Button 8)
+	0x15, 0x00, // LOGICAL_MINIMUM (0)
+	0x25, 0x01, // LOGICAL_MAXIMUM (1)
+	0x95, 0x08, // REPORT_COUNT (8)
+	0x75, 0x01, // REPORT_SIZE (1)
+	0x81, 0x02, // INPUT (Data,Var,Abs)
+
+	// X, Y, Wheel
+	0x05, 0x01, // USAGE_PAGE (Generic Desktop)
+	0x09, 0x30, // USAGE (X)
+	0x09, 0x31, // USAGE (Y)
+	0x09, 0x38, // USAGE (Wheel)
+	0x15, 0x81, // LOGICAL_MINIMUM (-127)
+	0x25, 0x7f, // LOGICAL_MAXIMUM (127)
+	0x75, 0x08, // REPORT_SIZE (8)
+	0x95, 0x03, // REPORT_COUNT (3)
+	0x81, 0x06, // INPUT (Data,Var,Rel)
+
+	// End
+	0xc0, //       End Collection (Physical)
+	0xc0, //       End Collection
 }

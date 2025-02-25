@@ -96,6 +96,7 @@ export default function SettingsSidebar() {
 
   const hideCursor = useSettingsStore(state => state.isCursorHidden);
   const setHideCursor = useSettingsStore(state => state.setCursorVisibility);
+  const setMouseMode = useSettingsStore(state => state.setMouseMode);
   const setDeveloperMode = useSettingsStore(state => state.setDeveloperMode);
   const setBacklightSettings = useSettingsStore(state => state.setBacklightSettings);
 
@@ -498,7 +499,7 @@ export default function SettingsSidebar() {
               <div className="flex items-center gap-4">
                 <button
                   className="block group grow"
-                  onClick={() => console.log("Absolute mouse mode clicked")}
+                  onClick={() => { setMouseMode("absolute"); }}
                 >
                   <GridCard>
                     <div className="flex items-center px-4 py-3 group gap-x-4">
@@ -516,14 +517,16 @@ export default function SettingsSidebar() {
                             Most convenient
                           </p>
                         </div>
-                        <CheckCircleIcon className="w-4 h-4 text-blue-700 dark:text-blue-500" />
+                        {settings.mouseMode === "absolute" && (
+                          <CheckCircleIcon className="w-4 h-4 text-blue-700 dark:text-blue-500" />
+                        )}
                       </div>
                     </div>
                   </GridCard>
                 </button>
                 <button
-                  className="block opacity-50 cursor-not-allowed group grow"
-                  disabled
+                  className="block group grow"
+                  onClick={() => { setMouseMode("relative"); }}
                 >
                   <GridCard>
                     <div className="flex items-center px-4 py-3 gap-x-4">
@@ -534,9 +537,12 @@ export default function SettingsSidebar() {
                             Relative
                           </h3>
                           <p className="text-xs leading-none text-slate-800 dark:text-slate-300">
-                            Coming soon
+                            For advanced users
                           </p>
                         </div>
+                        {settings.mouseMode === "relative" && (
+                          <CheckCircleIcon className="w-4 h-4 text-blue-700 dark:text-blue-500" />
+                        )}
                       </div>
                     </div>
                   </GridCard>
@@ -859,43 +865,43 @@ export default function SettingsSidebar() {
         </SettingsItem>
         {settings.backlightSettings.max_brightness != 0 && (
           <>
-          <SettingsItem title="Dim Display After" description="Set how long to wait before dimming the display">
-            <SelectMenuBasic
-              size="SM"
-              label=""
-              value={settings.backlightSettings.dim_after.toString()}
-              options={[
-                { value: "0", label: "Never" },
-                { value: "60", label: "1 Minute" },
-                { value: "300", label: "5 Minutes" },
-                { value: "600", label: "10 Minutes" },
-                { value: "1800", label: "30 Minutes" },
-                { value: "3600", label: "1 Hour" },
-              ]}
-              onChange={e => {
-                settings.backlightSettings.dim_after = parseInt(e.target.value)
-                handleBacklightSettingsChange(settings.backlightSettings);
-              }}
-            />
-          </SettingsItem>
-          <SettingsItem title="Turn off Display After" description="Set how long to wait before turning off the display">
-            <SelectMenuBasic
-              size="SM"
-              label=""
-              value={settings.backlightSettings.off_after.toString()}
-              options={[
-                { value: "0", label: "Never" },
-                { value: "300", label: "5 Minutes" },
-                { value: "600", label: "10 Minutes" },
-                { value: "1800", label: "30 Minutes" },
-                { value: "3600", label: "1 Hour" },
-              ]}
-              onChange={e => {
-                settings.backlightSettings.off_after = parseInt(e.target.value)
-                handleBacklightSettingsChange(settings.backlightSettings);
-              }}
-            />
-          </SettingsItem>
+            <SettingsItem title="Dim Display After" description="Set how long to wait before dimming the display">
+              <SelectMenuBasic
+                size="SM"
+                label=""
+                value={settings.backlightSettings.dim_after.toString()}
+                options={[
+                  { value: "0", label: "Never" },
+                  { value: "60", label: "1 Minute" },
+                  { value: "300", label: "5 Minutes" },
+                  { value: "600", label: "10 Minutes" },
+                  { value: "1800", label: "30 Minutes" },
+                  { value: "3600", label: "1 Hour" },
+                ]}
+                onChange={e => {
+                  settings.backlightSettings.dim_after = parseInt(e.target.value)
+                  handleBacklightSettingsChange(settings.backlightSettings);
+                }}
+              />
+            </SettingsItem>
+            <SettingsItem title="Turn off Display After" description="Set how long to wait before turning off the display">
+              <SelectMenuBasic
+                size="SM"
+                label=""
+                value={settings.backlightSettings.off_after.toString()}
+                options={[
+                  { value: "0", label: "Never" },
+                  { value: "300", label: "5 Minutes" },
+                  { value: "600", label: "10 Minutes" },
+                  { value: "1800", label: "30 Minutes" },
+                  { value: "3600", label: "1 Hour" },
+                ]}
+                onChange={e => {
+                  settings.backlightSettings.off_after = parseInt(e.target.value)
+                  handleBacklightSettingsChange(settings.backlightSettings);
+                }}
+              />
+            </SettingsItem>
           </>
         )}
         <p className="text-xs text-slate-600 dark:text-slate-400">

@@ -24,6 +24,7 @@ export default function InfoBar() {
   );
 
   const rpcDataChannel = useRTCStore(state => state.rpcDataChannel);
+  const lastError = useRTCStore(state => state.lastError);
 
   const settings = useSettingsStore();
 
@@ -83,7 +84,6 @@ export default function InfoBar() {
                 <span className="text-xs">{hdmiState}</span>
               </div>
             )}
-
             <div className="flex items-center gap-x-1">
               <span className="text-xs font-semibold">Keys:</span>
               <h2 className="text-xs">
@@ -97,6 +97,12 @@ export default function InfoBar() {
                 ].join(", ")}
               </h2>
             </div>
+            {lastError && (<div className="flex items-center gap-x-1">
+              <span className="text-xs font-semibold">Last Error:</span>
+              <h2 className="text-xs">
+                {lastError.message}
+              </h2>
+            </div>)}
           </div>
         </div>
         <div className="flex items-center divide-x first:divide-l divide-slate-800/20 dark:divide-slate-300/20">

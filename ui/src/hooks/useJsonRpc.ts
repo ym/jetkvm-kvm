@@ -8,6 +8,12 @@ export interface JsonRpcRequest {
   id: number | string;
 }
 
+export interface JsonRpcError {
+  code: number;
+  data?: string;
+  message: string;
+}
+
 type JsonRpcResponse =
   | {
       jsonrpc: string;
@@ -16,7 +22,7 @@ type JsonRpcResponse =
     }
   | {
       jsonrpc: string;
-      error: { code: number; data?: string; message: string };
+      error: JsonRpcError;
       id: string | number;
     };
 
@@ -25,6 +31,7 @@ let requestCounter = 0;
 
 export function useJsonRpc(onRequest?: (payload: JsonRpcRequest) => void) {
   const rpcDataChannel = useRTCStore(state => state.rpcDataChannel);
+  const setLastError = useRTCStore(state => state.setLastError);
 
   const send = useCallback(
     (method: string, params: unknown, callback?: (resp: JsonRpcResponse) => void) => {
@@ -52,7 +59,10 @@ export function useJsonRpc(onRequest?: (payload: JsonRpcRequest) => void) {
         return;
       }
 
-      if ("error" in payload) console.error(payload.error);
+      if ("error" in payload) {
+        setLastError(payload.error);
+        console.error(payload.error);
+      }
       if (!payload.id) return;
 
       const callback = callbackStore.get(payload.id);
@@ -67,7 +77,7 @@ export function useJsonRpc(onRequest?: (payload: JsonRpcRequest) => void) {
     return () => {
       rpcDataChannel.removeEventListener("message", messageHandler);
     };
-  }, [rpcDataChannel, onRequest]);
+  }, [rpcDataChannel, onRequest, setLastError]);
 
   return [send];
 }
