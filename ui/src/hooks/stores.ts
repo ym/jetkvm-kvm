@@ -20,8 +20,7 @@ const appendStatToMap = <T extends { timestamp: number }>(
 };
 
 // Constants and types
-export type AvailableSidebarViews = "system" | "connection-stats";
-export type AvailableModalViews = "connection-stats" | "settings";
+export type AvailableSidebarViews = "connection-stats";
 export type AvailableTerminalTypes = "kvm" | "serial" | "none";
 
 export interface User {
@@ -46,9 +45,6 @@ interface UIState {
   setWakeOnLanModalVisibility: (enabled: boolean) => void;
 
   toggleSidebarView: (view: AvailableSidebarViews) => void;
-
-  modalView: AvailableModalViews | null;
-  setModalView: (view: AvailableModalViews | null) => void;
 
   isAttachedVirtualKeyboardVisible: boolean;
   setAttachedVirtualKeyboardVisibility: (enabled: boolean) => void;
@@ -78,9 +74,6 @@ export const useUiStore = create<UIState>(set => ({
         return { sidebarView: view };
       }
     }),
-
-  modalView: null,
-  setModalView: view => set({ modalView: view }),
 
   isAttachedVirtualKeyboardVisible: true,
   setAttachedVirtualKeyboardVisibility: enabled =>
@@ -303,7 +296,8 @@ export const useSettingsStore = create(
         dim_after: 10000,
         off_after: 50000,
       },
-      setBacklightSettings: (settings: BacklightSettings) => set({ backlightSettings: settings }),
+      setBacklightSettings: (settings: BacklightSettings) =>
+        set({ backlightSettings: settings }),
     }),
     {
       name: "settings",
@@ -484,8 +478,6 @@ export interface UpdateState {
     | "updateCompleted"
     | "error";
   setModalView: (view: UpdateState["modalView"]) => void;
-  isUpdateDialogOpen: boolean;
-  setIsUpdateDialogOpen: (isOpen: boolean) => void;
   setUpdateErrorMessage: (errorMessage: string) => void;
   updateErrorMessage: string | null;
 }
@@ -520,16 +512,12 @@ export const useUpdateStore = create<UpdateState>(set => ({
     set({ updateDialogHasBeenMinimized: hasBeenMinimized }),
   modalView: "loading",
   setModalView: view => set({ modalView: view }),
-  isUpdateDialogOpen: false,
-  setIsUpdateDialogOpen: isOpen => set({ isUpdateDialogOpen: isOpen }),
   updateErrorMessage: null,
   setUpdateErrorMessage: errorMessage => set({ updateErrorMessage: errorMessage }),
 }));
 
 interface UsbConfigModalState {
-  modalView:
-      | "updateUsbConfig"
-      | "updateUsbConfigSuccess";
+  modalView: "updateUsbConfig" | "updateUsbConfigSuccess";
   errorMessage: string | null;
   setModalView: (view: UsbConfigModalState["modalView"]) => void;
   setErrorMessage: (message: string | null) => void;
@@ -558,14 +546,10 @@ interface LocalAuthModalState {
     | "creationSuccess"
     | "deleteSuccess"
     | "updateSuccess";
-  errorMessage: string | null;
   setModalView: (view: LocalAuthModalState["modalView"]) => void;
-  setErrorMessage: (message: string | null) => void;
 }
 
 export const useLocalAuthModalStore = create<LocalAuthModalState>(set => ({
   modalView: "createPassword",
-  errorMessage: null,
   setModalView: view => set({ modalView: view }),
-  setErrorMessage: message => set({ errorMessage: message }),
 }));

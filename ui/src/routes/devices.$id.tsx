@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cx } from "@/cva.config";
-import { Transition } from "@headlessui/react";
 import {
   HidState,
   UpdateState,
@@ -16,27 +15,30 @@ import {
 import WebRTCVideo from "@components/WebRTCVideo";
 import {
   LoaderFunctionArgs,
+  Outlet,
   Params,
   redirect,
   useLoaderData,
+  useLocation,
   useNavigate,
+  useOutlet,
   useParams,
   useSearchParams,
 } from "react-router-dom";
 import { checkAuth, isInCloud, isOnDevice } from "@/main";
 import DashboardNavbar from "@components/Header";
 import { useInterval } from "usehooks-ts";
-import SettingsSidebar from "@/components/sidebar/settings";
 import ConnectionStatsSidebar from "@/components/sidebar/connectionStats";
 import { JsonRpcRequest, useJsonRpc } from "@/hooks/useJsonRpc";
-import UpdateDialog from "@components/UpdateDialog";
 import UpdateInProgressStatusCard from "../components/UpdateInProgressStatusCard";
 import api from "../api";
 import { DeviceStatus } from "./welcome-local";
 import FocusTrap from "focus-trap-react";
-import OtherSessionConnectedModal from "@/components/OtherSessionConnectedModal";
 import Terminal from "@components/Terminal";
 import { CLOUD_API, DEVICE_API } from "@/ui.config";
+import Modal from "../components/Modal";
+import { motion, AnimatePresence } from "motion/react";
+import { useDeviceUiNavigation } from "../hooks/useAppNavigation";
 
 interface LocalLoaderResp {
   authMode: "password" | "noPassword" | null;
@@ -50,8 +52,9 @@ interface CloudLoaderResp {
   } | null;
 }
 
+export type AuthMode = "password" | "noPassword" | null;
 export interface LocalDevice {
-  authMode: "password" | "noPassword" | null;
+  authMode: AuthMode;
   deviceId: string;
 }
 
@@ -123,16 +126,7 @@ export default function KvmIdRoute() {
   const setTransceiver = useRTCStore(state => state.setTransceiver);
 
   const navigate = useNavigate();
-  const {
-    otaState,
-    setOtaState,
-    isUpdateDialogOpen,
-    setIsUpdateDialogOpen,
-    setModalView,
-  } = useUpdateStore();
-
-  const [isOtherSessionConnectedModalOpen, setIsOtherSessionConnectedModalOpen] =
-    useState(false);
+  const { otaState, setOtaState, setModalView } = useUpdateStore();
 
   const sdp = useCallback(
     async (event: RTCPeerConnectionIceEvent, pc: RTCPeerConnection) => {
@@ -243,8 +237,7 @@ export default function KvmIdRoute() {
     ) {
       return;
     }
-    // We don't want to connect if another session is connected
-    if (isOtherSessionConnectedModalOpen) return;
+    if (location.pathname.includes("other-session")) return;
     connectWebRTC();
   }, 3000);
 
@@ -330,11 +323,11 @@ export default function KvmIdRoute() {
   const setHdmiState = useVideoStore(state => state.setHdmiState);
 
   const [hasUpdated, setHasUpdated] = useState(false);
+  const { navigateTo } = useDeviceUiNavigation();
 
   function onJsonRpcRequest(resp: JsonRpcRequest) {
     if (resp.method === "otherSessionConnected") {
-      console.log("otherSessionConnected", resp.params);
-      setIsOtherSessionConnectedModalOpen(true);
+      navigateTo("/other-session");
     }
 
     if (resp.method === "usbState") {
@@ -358,7 +351,7 @@ export default function KvmIdRoute() {
 
         if (otaState.error) {
           setModalView("error");
-          setIsUpdateDialogOpen(true);
+          navigateTo("/settings/general/update");
           return;
         }
 
@@ -388,11 +381,9 @@ export default function KvmIdRoute() {
   // When the update is successful, we need to refresh the client javascript and show a success modal
   useEffect(() => {
     if (queryParams.get("updateSuccess")) {
-      setModalView("updateCompleted");
-      setIsUpdateDialogOpen(true);
-      setQueryParams({});
+      navigateTo("/settings/general/update", { state: { updateSuccess: true } });
     }
-  }, [queryParams, setIsUpdateDialogOpen, setModalView, setQueryParams]);
+  }, [navigate, navigateTo, queryParams, setModalView, setQueryParams]);
 
   const diskChannel = useRTCStore(state => state.diskChannel)!;
   const file = useMountMediaStore(state => state.localFile)!;
@@ -445,18 +436,27 @@ export default function KvmIdRoute() {
     };
   }, [kvmTerminal]);
 
+  const outlet = useOutlet();
+  const location = useLocation();
+  const onModalClose = useCallback(() => {
+    if (location.pathname !== "/other-session") navigateTo("..");
+  }, [navigateTo, location.pathname]);
+
   return (
     <>
-      <Transition show={!isUpdateDialogOpen && otaState.updating}>
-        <div className="pointer-events-none fixed inset-0 z-10 mx-auto flex h-full w-full max-w-xl translate-y-8 items-start justify-center">
-          <div className="transition duration-1000 ease-in data-[closed]:opacity-0">
-            <UpdateInProgressStatusCard
-              setIsUpdateDialogOpen={setIsUpdateDialogOpen}
-              setModalView={setModalView}
-            />
-          </div>
-        </div>
-      </Transition>
+      {!outlet && otaState.updating && (
+        <AnimatePresence>
+          <motion.div
+            className="pointer-events-none fixed inset-0 top-16 z-10 mx-auto flex h-full w-full max-w-xl translate-y-8 items-start justify-center"
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.3, ease: "easeInOut" }}
+          >
+            <UpdateInProgressStatusCard />
+          </motion.div>
+        </AnimatePresence>
+      )}
       <div className="relative h-full">
         <FocusTrap
           paused={disableKeyboardFocusTrap}
@@ -486,21 +486,24 @@ export default function KvmIdRoute() {
           </div>
         </div>
       </div>
-      <UpdateDialog open={isUpdateDialogOpen} setOpen={setIsUpdateDialogOpen} />
-      <OtherSessionConnectedModal
-        open={isOtherSessionConnectedModalOpen}
-        setOpen={state => {
-          if (!state) connectWebRTC().then(r => r);
 
-          // It takes some time for the WebRTC connection to be established, so we wait a bit before closing the modal
-          setTimeout(() => {
-            setIsOtherSessionConnectedModalOpen(state);
-          }, 1000);
+      <div
+        className="isolate"
+        onKeyUp={e => e.stopPropagation()}
+        onKeyDown={e => {
+          e.stopPropagation();
+          if (e.key === "Escape") navigateTo("/");
         }}
-      />
+      >
+        <Modal open={outlet !== null} onClose={onModalClose}>
+          <Outlet context={{ connectWebRTC }} />
+        </Modal>
+      </div>
+
       {kvmTerminal && (
         <Terminal type="kvm" dataChannel={kvmTerminal} title="KVM Terminal" />
       )}
+
       {serialConsole && (
         <Terminal type="serial" dataChannel={serialConsole} title="Serial Console" />
       )}
@@ -518,16 +521,22 @@ function SidebarContainer({ sidebarView }: { sidebarView: string | null }) {
       style={{ width: sidebarView ? "493px" : 0 }}
     >
       <div className="relative w-[493px] shrink-0">
-        <Transition show={sidebarView === "system"} unmount={false}>
-          <div className="absolute inset-0">
-            <SettingsSidebar />
-          </div>
-        </Transition>
-        <Transition show={sidebarView === "connection-stats"} unmount={false}>
-          <div className="absolute inset-0">
-            <ConnectionStatsSidebar />
-          </div>
-        </Transition>
+        <AnimatePresence>
+          {sidebarView === "connection-stats" && (
+            <motion.div
+              className="absolute inset-0"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{
+                duration: 0.5,
+                ease: "easeInOut",
+              }}
+            >
+              <ConnectionStatsSidebar />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
