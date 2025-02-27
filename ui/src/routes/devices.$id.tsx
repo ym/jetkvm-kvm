@@ -439,7 +439,7 @@ export default function KvmIdRoute() {
   const outlet = useOutlet();
   const location = useLocation();
   const onModalClose = useCallback(() => {
-    if (location.pathname !== "/other-session") navigateTo("..");
+    if (location.pathname !== "/other-session") navigateTo("/");
   }, [navigateTo, location.pathname]);
 
   return (
