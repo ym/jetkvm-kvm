@@ -2,7 +2,7 @@ import { SettingsPageHeader } from "@components/SettingsPageheader";
 import { SettingsItem } from "./devices.$id.settings";
 import { useLoaderData, useNavigate } from "react-router-dom";
 import { Button, LinkButton } from "../components/Button";
-import { CLOUD_APP, DEVICE_API } from "../ui.config";
+import { DEVICE_API } from "../ui.config";
 import api from "../api";
 import { LocalDevice } from "./devices.$id";
 import { useDeviceUiNavigation } from "../hooks/useAppNavigation";
@@ -15,6 +15,7 @@ import { InputFieldWithLabel } from "../components/InputField";
 import { SelectMenuBasic } from "../components/SelectMenuBasic";
 import { SettingsSectionHeader } from "../components/SettingsSectionHeader";
 import { isOnDevice } from "../main";
+import { CloudState } from "./adopt";
 
 export const loader = async () => {
   if (isOnDevice) {
@@ -36,38 +37,30 @@ export default function SettingsAccessIndexRoute() {
 
   const [isAdopted, setAdopted] = useState(false);
   const [deviceId, setDeviceId] = useState<string | null>(null);
-  const [cloudUrl, setCloudUrl] = useState("");
-  const [cloudProviders, setCloudProviders] = useState<
-    { value: string; label: string }[] | null
-  >([{ value: "https://api.jetkvm.com", label: "JetKVM Cloud" }]);
+  const [cloudApiUrl, setCloudApiUrl] = useState("");
+  const [cloudAppUrl, setCloudAppUrl] = useState("");
 
-  // The default value is just there so it doesn't flicker while we fetch the default Cloud URL and available providers
-  const [selectedUrlOption, setSelectedUrlOption] = useState<string>(
-    "https://api.jetkvm.com",
-  );
-
-  const [defaultCloudUrl, setDefaultCloudUrl] = useState<string>("");
-
-  const syncCloudUrl = useCallback(() => {
-    send("getCloudUrl", {}, resp => {
-      if ("error" in resp) return;
-      const url = resp.result as string;
-      setCloudUrl(url);
-      // Check if the URL matches any predefined option
-      if (cloudProviders?.some(provider => provider.value === url)) {
-        setSelectedUrlOption(url);
-      } else {
-        setSelectedUrlOption("custom");
-        // setCustomCloudUrl(url);
-      }
-    });
-  }, [cloudProviders, send]);
+  // Use a simple string identifier for the selected provider
+  const [selectedProvider, setSelectedProvider] = useState<string>("jetkvm");
 
   const getCloudState = useCallback(() => {
     send("getCloudState", {}, resp => {
       if ("error" in resp) return console.error(resp.error);
-      const cloudState = resp.result as { connected: boolean };
+      const cloudState = resp.result as CloudState;
       setAdopted(cloudState.connected);
+      setCloudApiUrl(cloudState.url);
+
+      if (cloudState.appUrl) setCloudAppUrl(cloudState.appUrl);
+
+      // Find if the API URL matches any of our predefined providers
+      const isAPIJetKVMProd = cloudState.url === "https://api.jetkvm.com";
+      const isAppJetKVMProd = cloudState.appUrl === "https://app.jetkvm.com";
+
+      if (isAPIJetKVMProd && isAppJetKVMProd) {
+        setSelectedProvider("jetkvm");
+      } else {
+        setSelectedProvider("custom");
+      }
     });
   }, [send]);
 
@@ -88,42 +81,50 @@ export default function SettingsAccessIndexRoute() {
   };
 
   const onCloudAdoptClick = useCallback(
-    (url: string) => {
+    (cloudApiUrl: string, cloudAppUrl: string) => {
       if (!deviceId) {
         notifications.error("No device ID available");
         return;
       }
 
-      send("setCloudUrl", { url }, resp => {
+      send("setCloudUrl", { apiUrl: cloudApiUrl, appUrl: cloudAppUrl }, resp => {
         if ("error" in resp) {
           notifications.error(
             `Failed to update cloud URL: ${resp.error.data || "Unknown error"}`,
           );
           return;
         }
-        syncCloudUrl();
-        notifications.success("Cloud URL updated successfully");
 
         const returnTo = new URL(window.location.href);
         returnTo.pathname = "/adopt";
         returnTo.search = "";
         returnTo.hash = "";
         window.location.href =
-          CLOUD_APP + "/signup?deviceId=" + deviceId + `&returnTo=${returnTo.toString()}`;
+          cloudAppUrl +
+          "/signup?deviceId=" +
+          deviceId +
+          `&returnTo=${returnTo.toString()}`;
       });
     },
-    [deviceId, syncCloudUrl, send],
+    [deviceId, send],
   );
 
-  useEffect(() => {
-    if (!defaultCloudUrl) return;
-    setSelectedUrlOption(defaultCloudUrl);
-    setCloudProviders([
-      { value: defaultCloudUrl, label: "JetKVM Cloud" },
-      { value: "custom", label: "Custom" },
-    ]);
-  }, [defaultCloudUrl]);
+  // Handle provider selection change
+  const handleProviderChange = (value: string) => {
+    setSelectedProvider(value);
 
+    // If selecting a predefined provider, update both URLs
+    if (value === "jetkvm") {
+      setCloudApiUrl("https://api.jetkvm.com");
+      setCloudAppUrl("https://app.jetkvm.com");
+    } else {
+      if (cloudApiUrl || cloudAppUrl) return;
+      setCloudApiUrl("");
+      setCloudAppUrl("");
+    }
+  };
+
+  // Fetch device ID and cloud state on component mount
   useEffect(() => {
     getCloudState();
 
@@ -132,18 +133,6 @@ export default function SettingsAccessIndexRoute() {
       setDeviceId(resp.result as string);
     });
   }, [send, getCloudState]);
-
-  useEffect(() => {
-    send("getDefaultCloudUrl", {}, resp => {
-      if ("error" in resp) return console.error(resp.error);
-      setDefaultCloudUrl(resp.result as string);
-    });
-  }, [cloudProviders, syncCloudUrl, send]);
-
-  useEffect(() => {
-    if (!cloudProviders?.length) return;
-    syncCloudUrl();
-  }, [cloudProviders, syncCloudUrl]);
 
   return (
     <div className="space-y-4">
@@ -219,34 +208,42 @@ export default function SettingsAccessIndexRoute() {
               >
                 <SelectMenuBasic
                   size="SM"
-                  value={selectedUrlOption}
-                  onChange={e => {
-                    const value = e.target.value;
-                    setSelectedUrlOption(value);
-                  }}
-                  options={cloudProviders ?? []}
+                  value={selectedProvider}
+                  onChange={e => handleProviderChange(e.target.value)}
+                  options={[
+                    { value: "jetkvm", label: "JetKVM Cloud" },
+                    { value: "custom", label: "Custom" },
+                  ]}
                 />
               </SettingsItem>
 
-              {selectedUrlOption === "custom" && (
-                <div className="mt-4 flex items-end gap-x-2 space-y-4">
-                  <InputFieldWithLabel
-                    size="SM"
-                    label="Custom Cloud URL"
-                    value={cloudUrl}
-                    onChange={e => setCloudUrl(e.target.value)}
-                    placeholder="https://api.example.com"
-                  />
+              {selectedProvider === "custom" && (
+                <div className="mt-4 space-y-4">
+                  <div className="flex items-end gap-x-2">
+                    <InputFieldWithLabel
+                      size="SM"
+                      label="Cloud API URL"
+                      value={cloudApiUrl}
+                      onChange={e => setCloudApiUrl(e.target.value)}
+                      placeholder="https://api.example.com"
+                    />
+                  </div>
+                  <div className="flex items-end gap-x-2">
+                    <InputFieldWithLabel
+                      size="SM"
+                      label="Cloud App URL"
+                      value={cloudAppUrl}
+                      onChange={e => setCloudAppUrl(e.target.value)}
+                      placeholder="https://app.example.com"
+                    />
+                  </div>
                 </div>
               )}
             </>
           )}
 
-          {/*
-                We do the harcoding here to avoid flickering when the default Cloud URL being fetched.
-                I've tried to avoid harcoding api.jetkvm.com, but it's the only reasonable way I could think of to avoid flickering for now.
-              */}
-          {selectedUrlOption === (defaultCloudUrl || "https://api.jetkvm.com") && (
+          {/* Show security info for JetKVM Cloud */}
+          {selectedProvider === "jetkvm" && (
             <GridCard>
               <div className="flex items-start gap-x-4 p-4">
                 <ShieldCheckIcon className="mt-1 h-8 w-8 shrink-0 text-blue-600 dark:text-blue-500" />
@@ -295,7 +292,7 @@ export default function SettingsAccessIndexRoute() {
           {!isAdopted ? (
             <div className="flex items-end gap-x-2">
               <Button
-                onClick={() => onCloudAdoptClick(cloudUrl)}
+                onClick={() => onCloudAdoptClick(cloudApiUrl, cloudAppUrl)}
                 size="SM"
                 theme="primary"
                 text="Adopt KVM to Cloud"
@@ -305,7 +302,7 @@ export default function SettingsAccessIndexRoute() {
             <div>
               <div className="space-y-2">
                 <p className="text-sm text-slate-600 dark:text-slate-300">
-                  Your device is adopted to JetKVM Cloud
+                  Your device is adopted to the Cloud
                 </p>
                 <div>
                   <Button

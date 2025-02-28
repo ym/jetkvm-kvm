@@ -177,7 +177,6 @@ if (isOnDevice) {
         },
       ],
     },
-
     {
       path: "/adopt",
       element: <AdoptRoute />,
