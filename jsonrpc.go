@@ -540,12 +540,12 @@ func rpcSetUsbEmulationState(enabled bool) error {
 
 func rpcGetUsbConfig() (UsbConfig, error) {
 	LoadConfig()
-	return config.UsbConfig, nil
+	return *config.UsbConfig, nil
 }
 
 func rpcSetUsbConfig(usbConfig UsbConfig) error {
 	LoadConfig()
-	config.UsbConfig = usbConfig
+	config.UsbConfig = &usbConfig
 
 	err := UpdateGadgetConfig()
 	if err != nil {
