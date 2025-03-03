@@ -116,3 +116,9 @@ func SaveConfig() error {
 
 	return nil
 }
+
+func ensureConfigLoaded() {
+	if config == nil {
+		LoadConfig()
+	}
+}

@@ -248,6 +248,8 @@ func startBacklightTickers() {
 }
 
 func init() {
+	ensureConfigLoaded()
+
 	go func() {
 		waitCtrlClientConnected()
 		fmt.Println("setting initial display contents")
