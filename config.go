@@ -37,7 +37,7 @@ type Config struct {
 	DisplayMaxBrightness int               `json:"display_max_brightness"`
 	DisplayDimAfterSec   int               `json:"display_dim_after_sec"`
 	DisplayOffAfterSec   int               `json:"display_off_after_sec"`
-	UsbConfig            UsbConfig         `json:"usb_config"`
+	UsbConfig            *UsbConfig        `json:"usb_config"`
 }
 
 const configPath = "/userdata/kvm_config.json"
@@ -50,7 +50,7 @@ var defaultConfig = &Config{
 	DisplayMaxBrightness: 64,
 	DisplayDimAfterSec:   120,  // 2 minutes
 	DisplayOffAfterSec:   1800, // 30 minutes
-	UsbConfig: UsbConfig{
+	UsbConfig: &UsbConfig{
 		VendorId:     "0x1d6b", //The Linux Foundation
 		ProductId:    "0x0104", //Multifunction Composite Gadget
 		SerialNumber: "",
@@ -88,6 +88,11 @@ func LoadConfig() {
 	if err := json.NewDecoder(file).Decode(&loadedConfig); err != nil {
 		logger.Errorf("config file JSON parsing failed, %v", err)
 		return
+	}
+
+	// merge the user config with the default config
+	if loadedConfig.UsbConfig == nil {
+		loadedConfig.UsbConfig = defaultConfig.UsbConfig
 	}
 
 	config = &loadedConfig
