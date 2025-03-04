@@ -20,6 +20,8 @@ func rpcGetJigglerState() bool {
 }
 
 func init() {
+	ensureConfigLoaded()
+
 	go runJiggler()
 }
 

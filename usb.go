@@ -34,6 +34,8 @@ func mountConfigFS() error {
 }
 
 func init() {
+	ensureConfigLoaded()
+
 	_ = os.MkdirAll(imagesFolder, 0755)
 	udcs := gadget.GetUdcs()
 	if len(udcs) < 1 {
@@ -383,6 +385,8 @@ func triggerUSBStateUpdate() {
 var udc string
 
 func init() {
+	ensureConfigLoaded()
+
 	go func() {
 		for {
 			newState := rpcGetUSBState()

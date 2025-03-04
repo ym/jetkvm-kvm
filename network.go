@@ -190,6 +190,8 @@ func getNTPServersFromDHCPInfo() ([]string, error) {
 }
 
 func init() {
+	ensureConfigLoaded()
+
 	updates := make(chan netlink.LinkUpdate)
 	done := make(chan struct{})
 
