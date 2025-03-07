@@ -16,6 +16,9 @@ export default function SettingsKeyboardMouseRoute() {
 
   const [jiggler, setJiggler] = useState(false);
 
+  const mouseMode = useSettingsStore(state => state.mouseMode);
+  const setMouseMode = useSettingsStore(state => state.setMouseMode);
+
   const [send] = useJsonRpc();
 
   useEffect(() => {
@@ -68,7 +71,7 @@ export default function SettingsKeyboardMouseRoute() {
           <div className="flex flex-col items-center gap-4 md:flex-row">
             <button
               className="group block w-full grow"
-              onClick={() => console.log("Absolute mouse mode clicked")}
+              onClick={() => setMouseMode("absolute")}
             >
               <GridCard>
                 <div className="group flex items-center gap-x-4 px-4 py-3">
@@ -88,6 +91,7 @@ export default function SettingsKeyboardMouseRoute() {
                     </div>
                     <CheckCircleIcon
                       className={cx(
+                        mouseMode == "absolute" ? "" : "hidden",
                         "h-4 w-4 text-blue-700 transition-opacity duration-300 dark:text-blue-500",
                       )}
                     />
@@ -96,15 +100,15 @@ export default function SettingsKeyboardMouseRoute() {
               </GridCard>
             </button>
             <button
-              className="group block w-full grow cursor-not-allowed opacity-50"
-              disabled
+              className="group block w-full grow"
+              onClick={() => setMouseMode("relative")}
             >
               <GridCard>
                 <div className="group flex items-center gap-x-4 px-4 py-3">
                   <img
                     className="w-6 shrink-0 dark:invert"
                     src={PointingFinger}
-                    alt="Finger touching a screen"
+                    alt="Relative mouse mode"
                   />
                   <div className="flex grow items-center justify-between">
                     <div className="text-left">
@@ -117,7 +121,7 @@ export default function SettingsKeyboardMouseRoute() {
                     </div>
                     <CheckCircleIcon
                       className={cx(
-                        "hidden",
+                        mouseMode == "relative" ? "" : "hidden",
                         "h-4 w-4 text-blue-700 transition-opacity duration-300 dark:text-blue-500",
                       )}
                     />

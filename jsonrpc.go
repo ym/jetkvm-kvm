@@ -771,6 +771,7 @@ var rpcHandlers = map[string]RPCHandler{
 	"getCloudState":          {Func: rpcGetCloudState},
 	"keyboardReport":         {Func: rpcKeyboardReport, Params: []string{"modifier", "keys"}},
 	"absMouseReport":         {Func: rpcAbsMouseReport, Params: []string{"x", "y", "buttons"}},
+	"relMouseReport":         {Func: rpcRelMouseReport, Params: []string{"mx", "my", "buttons"}},
 	"wheelReport":            {Func: rpcWheelReport, Params: []string{"wheelY"}},
 	"getVideoState":          {Func: rpcGetVideoState},
 	"getUSBState":            {Func: rpcGetUSBState},

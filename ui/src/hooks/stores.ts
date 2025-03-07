@@ -197,15 +197,23 @@ export const useRTCStore = create<RTCState>(set => ({
   setTerminalChannel: channel => set({ terminalChannel: channel }),
 }));
 
+interface MouseMove {
+  x: number;
+  y: number;
+  buttons: number;
+}
 interface MouseState {
   mouseX: number;
   mouseY: number;
+  mouseMove?: MouseMove;
+  setMouseMove: (move?: MouseMove) => void;
   setMousePosition: (x: number, y: number) => void;
 }
 
 export const useMouseStore = create<MouseState>(set => ({
   mouseX: 0,
   mouseY: 0,
+  setMouseMove: (move?: MouseMove) => set({ mouseMove: move }),
   setMousePosition: (x, y) => set({ mouseX: x, mouseY: y }),
 }));
 

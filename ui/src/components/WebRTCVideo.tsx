@@ -28,6 +28,7 @@ export default function WebRTCVideo() {
   const settings = useSettingsStore();
   const { sendKeyboardEvent, resetKeyboardState } = useKeyboard();
   const setMousePosition = useMouseStore(state => state.setMousePosition);
+  const setMouseMove = useMouseStore(state => state.setMouseMove);
   const {
     setClientSize: setVideoClientSize,
     setSize: setVideoSize,
@@ -92,14 +93,22 @@ export default function WebRTCVideo() {
   );
 
   // Mouse-related
+  const calcDelta = (pos: number) => Math.abs(pos) < 10 ? pos * 2 : pos;
+
   const sendMouseMovement = useCallback(
     (x: number, y: number, buttons: number) => {
-      send("absMouseReport", { x, y, buttons });
-
-      // We set that for the debug info bar
-      setMousePosition(x, y);
+      if (settings.mouseMode === "relative") {
+        // if we ignore the event, double-click will not work
+        // if (x === 0 && y === 0 && buttons === 0) return;
+        send("relMouseReport", { mx: calcDelta(x), my: calcDelta(y), buttons });
+        setMouseMove({ x, y, buttons });
+      } else if (settings.mouseMode === "absolute") {
+        send("absMouseReport", { x, y, buttons });
+        // We set that for the debug info bar
+        setMousePosition(x, y);
+      }
     },
-    [send, setMousePosition],
+    [send, setMousePosition, setMouseMove, settings.mouseMode],
   );
 
   const mouseMoveHandler = useCallback(
@@ -108,6 +117,13 @@ export default function WebRTCVideo() {
       // Get the aspect ratios of the video element and the video stream
       const videoElementAspectRatio = videoClientWidth / videoClientHeight;
       const videoStreamAspectRatio = videoWidth / videoHeight;
+
+      const { buttons } = e;
+      // Send mouse movement events to the server
+      if (settings.mouseMode == "relative") {
+          sendMouseMovement(e.movementX, e.movementY, buttons);
+          return;
+      }
 
       // Calculate the effective video display area
       let effectiveWidth = videoClientWidth;
@@ -137,11 +153,9 @@ export default function WebRTCVideo() {
       const x = Math.round(relativeX * 32767);
       const y = Math.round(relativeY * 32767);
 
-      // Send mouse movement
-      const { buttons } = e;
       sendMouseMovement(x, y, buttons);
     },
-    [sendMouseMovement, videoClientHeight, videoClientWidth, videoWidth, videoHeight],
+    [sendMouseMovement, videoClientHeight, videoClientWidth, videoWidth, videoHeight, settings.mouseMode],
   );
 
   const mouseWheelHandler = useCallback(
