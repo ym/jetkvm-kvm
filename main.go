@@ -36,6 +36,8 @@ func Main() {
 	StartNativeCtrlSocketServer()
 	StartNativeVideoSocketServer()
 
+	initPrometheus()
+
 	go func() {
 		err = ExtractAndRunNativeBin()
 		if err != nil {
