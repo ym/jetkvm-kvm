@@ -68,6 +68,9 @@ func Main() {
 	}()
 	//go RunFuseServer()
 	go RunWebServer()
+	if config.TLSMode != "" {
+		go RunWebSecureServer()
+	}
 	// If the cloud token isn't set, the client won't be started by default.
 	// However, if the user adopts the device via the web interface, handleCloudRegister will start the client.
 	if config.CloudToken != "" {

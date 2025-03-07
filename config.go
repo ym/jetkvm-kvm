@@ -37,6 +37,7 @@ type Config struct {
 	DisplayMaxBrightness int               `json:"display_max_brightness"`
 	DisplayDimAfterSec   int               `json:"display_dim_after_sec"`
 	DisplayOffAfterSec   int               `json:"display_off_after_sec"`
+	TLSMode              string            `json:"tls_mode"`
 	UsbConfig            *UsbConfig        `json:"usb_config"`
 }
 
@@ -50,6 +51,7 @@ var defaultConfig = &Config{
 	DisplayMaxBrightness: 64,
 	DisplayDimAfterSec:   120,  // 2 minutes
 	DisplayOffAfterSec:   1800, // 30 minutes
+	TLSMode:              "",
 	UsbConfig: &UsbConfig{
 		VendorId:     "0x1d6b", //The Linux Foundation
 		ProductId:    "0x0104", //Multifunction Composite Gadget
