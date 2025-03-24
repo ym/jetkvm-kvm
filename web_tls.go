@@ -38,7 +38,7 @@ func RunWebSecureServer() {
 		TLSConfig: &tls.Config{
 			// TODO: cache certificate in persistent storage
 			GetCertificate: func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				hostname := WebSecureSelfSignedDefaultDomain
+				var hostname string
 				if info.ServerName != "" {
 					hostname = info.ServerName
 				} else {
@@ -58,7 +58,6 @@ func RunWebSecureServer() {
 	if err != nil {
 		panic(err)
 	}
-	return
 }
 
 func createSelfSignedCert(hostname string) *tls.Certificate {
