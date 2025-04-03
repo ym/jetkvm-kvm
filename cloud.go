@@ -90,11 +90,6 @@ func handleCloudRegister(c *gin.Context) {
 		return
 	}
 
-	if config.CloudToken == "" {
-		cloudLogger.Info("Starting websocket client due to adoption")
-		go RunWebsocketClient()
-	}
-
 	config.CloudToken = tokenResp.SecretToken
 
 	provider, err := oidc.NewProvider(c, "https://accounts.google.com")
@@ -130,6 +125,7 @@ func runWebsocketClient() error {
 		time.Sleep(5 * time.Second)
 		return fmt.Errorf("cloud token is not set")
 	}
+
 	wsURL, err := url.Parse(config.CloudURL)
 	if err != nil {
 		return fmt.Errorf("failed to parse config.CloudURL: %w", err)
@@ -253,6 +249,26 @@ func handleSessionRequest(ctx context.Context, c *websocket.Conn, req WebRTCSess
 
 func RunWebsocketClient() {
 	for {
+		// If the cloud token is not set, we don't need to run the websocket client.
+		if config.CloudToken == "" {
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		// If the network is not up, well, we can't connect to the cloud.
+		if !networkState.Up {
+			cloudLogger.Warn("waiting for network to be up, will retry in 3 seconds")
+			time.Sleep(3 * time.Second)
+			continue
+		}
+
+		// If the system time is not synchronized, the API request will fail anyway because the TLS handshake will fail.
+		if isTimeSyncNeeded() && !timeSyncSuccess {
+			cloudLogger.Warn("system time is not synced, will retry in 3 seconds")
+			time.Sleep(3 * time.Second)
+			continue
+		}
+
 		err := runWebsocketClient()
 		if err != nil {
 			cloudLogger.Errorf("websocket client error: %v", err)
