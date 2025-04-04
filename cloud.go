@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket/wsjson"
@@ -113,6 +114,11 @@ var (
 	)
 )
 
+var (
+	cloudDisconnectChan chan error
+	cloudDisconnectLock = &sync.Mutex{}
+)
+
 func cloudResetMetrics(established bool) {
 	metricCloudConnectionLastPingTimestamp.Set(-1)
 	metricCloudConnectionLastPingDuration.Set(-1)
@@ -213,6 +219,24 @@ func handleCloudRegister(c *gin.Context) {
 	c.JSON(200, gin.H{"message": "Cloud registration successful"})
 }
 
+func disconnectCloud(reason error) {
+	cloudDisconnectLock.Lock()
+	defer cloudDisconnectLock.Unlock()
+
+	if cloudDisconnectChan == nil {
+		cloudLogger.Tracef("cloud disconnect channel is not set, no need to disconnect")
+		return
+	}
+
+	// just in case the channel is closed, we don't want to panic
+	defer func() {
+		if r := recover(); r != nil {
+			cloudLogger.Infof("cloud disconnect channel is closed, no need to disconnect: %v", r)
+		}
+	}()
+	cloudDisconnectChan <- reason
+}
+
 func runWebsocketClient() error {
 	if config.CloudToken == "" {
 		time.Sleep(5 * time.Second)
@@ -275,6 +299,23 @@ func runWebsocketClient() error {
 			metricCloudConnectionLastPingTimestamp.SetToCurrentTime()
 		}
 	}()
+
+	// create a channel to receive the disconnect event, once received, we cancelRun
+	cloudDisconnectChan = make(chan error)
+	defer func() {
+		close(cloudDisconnectChan)
+		cloudDisconnectChan = nil
+	}()
+	go func() {
+		for err := range cloudDisconnectChan {
+			if err == nil {
+				continue
+			}
+			cloudLogger.Infof("disconnecting from cloud due to: %v", err)
+			cancelRun()
+		}
+	}()
+
 	for {
 		typ, msg, err := c.Read(runCtx)
 		if err != nil {
@@ -447,6 +488,9 @@ func rpcDeregisterDevice() error {
 		if err := SaveConfig(); err != nil {
 			return fmt.Errorf("failed to save configuration after deregistering: %w", err)
 		}
+
+		cloudLogger.Infof("device deregistered, disconnecting from cloud")
+		disconnectCloud(fmt.Errorf("device deregistered"))
 
 		return nil
 	}
