@@ -54,7 +54,7 @@ func Main() {
 			if !config.AutoUpdateEnabled {
 				return
 			}
-			if currentSession != nil {
+			if getCurrentSession() != nil {
 				logger.Debugf("skipping update since a session is active")
 				time.Sleep(1 * time.Minute)
 				continue

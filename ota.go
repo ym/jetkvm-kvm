@@ -278,11 +278,12 @@ var otaState = OTAState{}
 
 func triggerOTAStateUpdate() {
 	go func() {
-		if currentSession == nil {
+		if getCurrentSession() == nil {
 			logger.Info("No active RPC session, skipping update state update")
 			return
 		}
-		writeJSONRPCEvent("otaState", otaState, currentSession)
+		// should we remove this line?
+		writeJSONRPCEvent("otaState", otaState, getCurrentSession())
 	}()
 }
 

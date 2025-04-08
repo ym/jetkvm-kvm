@@ -50,11 +50,11 @@ func rpcGetUSBState() (state string) {
 
 func triggerUSBStateUpdate() {
 	go func() {
-		if currentSession == nil {
+		if getCurrentSession() == nil {
 			logger.Info("No active RPC session, skipping update state update")
 			return
 		}
-		writeJSONRPCEvent("usbState", usbState, currentSession)
+		writeJSONRPCEvent("usbState", usbState, getCurrentSession())
 	}()
 }
 

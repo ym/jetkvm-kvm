@@ -357,19 +357,25 @@ func handleSessionRequest(ctx context.Context, c *websocket.Conn, req WebRTCSess
 		_ = wsjson.Write(context.Background(), c, gin.H{"error": err})
 		return err
 	}
-	if currentSession != nil {
-		writeJSONRPCEvent("otherSessionConnected", nil, currentSession)
-		peerConn := currentSession.peerConnection
-		go func() {
-			time.Sleep(1 * time.Second)
-			_ = peerConn.Close()
-		}()
-	}
 
-	cloudLogger.Info("new session accepted")
-	cloudLogger.Tracef("new session accepted: %v", session)
-	currentSession = session
-	_ = wsjson.Write(context.Background(), c, gin.H{"type": "answer", "data": sd})
+	// we need to lock the session mutex to avoid race condition
+	setCurrentSessionWithSetter(func(s *Session) *Session {
+		// disconnect the previous session
+		if s != nil {
+			writeJSONRPCEvent("otherSessionConnected", nil, currentSession)
+			peerConn := s.peerConnection
+			go func() {
+				time.Sleep(1 * time.Second)
+				_ = peerConn.Close()
+			}()
+		}
+
+		cloudLogger.Info("new session accepted")
+		cloudLogger.Tracef("new session accepted: %v", session)
+		_ = wsjson.Write(context.Background(), c, gin.H{"type": "answer", "data": sd})
+		return session
+	})
+
 	return nil
 }
 

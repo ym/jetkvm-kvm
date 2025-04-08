@@ -123,9 +123,6 @@ func setupRouter() *gin.Engine {
 	return r
 }
 
-// TODO: support multiple sessions?
-var currentSession *Session
-
 func handleLocalWebRTCSignal(c *gin.Context) {
 	cloudLogger.Infof("new websocket connection established")
 	// Create WebSocket options with InsecureSkipVerify to bypass origin check
@@ -291,7 +288,7 @@ func handleWebRTCSignalWsMessages(wsCon *websocket.Conn, isCloudConnection bool,
 
 			logInfof("unmarshalled incoming ICE candidate: %v", candidate)
 
-			if currentSession == nil {
+			if getCurrentSession() == nil {
 				logInfof("no current session, skipping incoming ICE candidate")
 				continue
 			}

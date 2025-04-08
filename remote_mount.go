@@ -40,12 +40,15 @@ func (w *WebRTCDiskReader) Read(ctx context.Context, offset int64, size int64) (
 		return nil, err
 	}
 
-	if currentSession == nil || currentSession.DiskChannel == nil {
+	// we need to lock the session mutex to avoid race condition
+	session := getCurrentSession()
+
+	if session == nil || session.DiskChannel == nil {
 		return nil, errors.New("not active session")
 	}
 
 	logger.Debugf("reading from webrtc %v", string(jsonBytes))
-	err = currentSession.DiskChannel.SendText(string(jsonBytes))
+	err = session.DiskChannel.SendText(string(jsonBytes))
 	if err != nil {
 		return nil, err
 	}

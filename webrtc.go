@@ -168,9 +168,12 @@ func newSession(config SessionConfig) (*Session, error) {
 			_ = peerConnection.Close()
 		}
 		if connectionState == webrtc.ICEConnectionStateClosed {
-			if session == currentSession {
-				currentSession = nil
-			}
+			setCurrentSessionWithSetter(func(session *Session) *Session {
+				if session == currentSession {
+					return nil
+				}
+				return session
+			})
 			if session.shouldUmountVirtualMedia {
 				err := rpcUnmountImage()
 				logger.Debugf("unmount image failed on connection close %v", err)
