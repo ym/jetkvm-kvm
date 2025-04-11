@@ -132,8 +132,14 @@ func queryNetworkTime() (*time.Time, error) {
 				Str("time", now.Format(time.RFC3339)).
 				Msg("NTP server returned time")
 			return now, nil
+		} else {
+			ntpLogger.Error().
+				Str("ntp_server", server).
+				Str("error", err.Error()).
+				Msg("failed to query NTP server")
 		}
 	}
+
 	httpUrls := []string{
 		"http://apple.com",
 		"http://cloudflare.com",
@@ -146,10 +152,15 @@ func queryNetworkTime() (*time.Time, error) {
 				Str("time", now.Format(time.RFC3339)).
 				Msg("HTTP server returned time")
 			return now, nil
+		} else {
+			ntpLogger.Error().
+				Str("http_url", url).
+				Str("error", err.Error()).
+				Msg("failed to query HTTP server")
 		}
 	}
 
-	return nil, ErrorfL(ntpLogger, "failed to query network time", nil)
+	return nil, ErrorfL(ntpLogger, "failed to query network time, all NTP servers and HTTP servers failed", nil)
 }
 
 func queryNtpServer(server string, timeout time.Duration) (now *time.Time, err error) {
