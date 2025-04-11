@@ -53,6 +53,7 @@ var (
 	watchdogLogger  = getLogger("watchdog")
 	websecureLogger = getLogger("websecure")
 	otaLogger       = getLogger("ota")
+	serialLogger    = getLogger("serial")
 	// external components
 	ginLogger = getLogger("gin")
 )
