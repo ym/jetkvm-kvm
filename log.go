@@ -55,10 +55,24 @@ var (
 	serialLogger    = getLogger("serial")
 	terminalLogger  = getLogger("terminal")
 	displayLogger   = getLogger("display")
+	wolLogger       = getLogger("wol")
 	usbLogger       = getLogger("usb")
 	// external components
 	ginLogger = getLogger("gin")
 )
+
+func ErrorfL(l *zerolog.Logger, format string, err error, args ...interface{}) error {
+	if l == nil {
+		l = &logger
+	}
+
+	l.Error().Err(err).Msgf(format, args...)
+
+	err_msg := err.Error() + ": %v"
+	err_args := append(args, err)
+
+	return fmt.Errorf(err_msg, err_args...)
+}
 
 func updateLogLevel() {
 	scopeLevelMutex.Lock()
