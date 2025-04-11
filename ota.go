@@ -194,7 +194,7 @@ func downloadFile(ctx context.Context, path string, url string, downloadProgress
 
 func verifyFile(path string, expectedHash string, verifyProgress *float32, scopedLogger *zerolog.Logger) error {
 	if scopedLogger == nil {
-		scopedLogger = &otaLogger
+		scopedLogger = otaLogger
 	}
 
 	unverifiedPath := path + ".unverified"

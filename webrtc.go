@@ -77,7 +77,7 @@ func newSession(config SessionConfig) (*Session, error) {
 		l := config.Logger.With().Str("component", "webrtc").Logger()
 		scopedLogger = &l
 	} else {
-		scopedLogger = &webrtcLogger
+		scopedLogger = webrtcLogger
 	}
 
 	if config.IsCloud {

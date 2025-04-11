@@ -69,7 +69,7 @@ func setupRouter() *gin.Engine {
 	r := gin.Default()
 	r.Use(gin_logger.SetLogger(
 		gin_logger.WithLogger(func(*gin.Context, zerolog.Logger) zerolog.Logger {
-			return ginLogger
+			return *ginLogger
 		}),
 	))
 	staticFS, _ := fs.Sub(staticFiles, "static")

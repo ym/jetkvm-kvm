@@ -74,11 +74,15 @@ func writeJSONRPCEvent(event string, params interface{}, session *Session) {
 	}
 
 	requestString := string(requestBytes)
-	jsonRpcLogger.Info().Str("data", requestString).Msg("Sending JSONRPC event")
+	scopedLogger := jsonRpcLogger.With().
+		Str("data", requestString).
+		Logger()
+
+	scopedLogger.Info().Msg("sending JSONRPC event")
 
 	err = session.RPCChannel.SendText(requestString)
 	if err != nil {
-		jsonRpcLogger.Warn().Err(err).Str("data", requestString).Msg("Error sending JSONRPC event")
+		scopedLogger.Warn().Err(err).Msg("error sending JSONRPC event")
 		return
 	}
 }
