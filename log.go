@@ -206,6 +206,10 @@ func ErrorfL(l *zerolog.Logger, format string, err error, args ...interface{}) e
 
 	l.Error().Err(err).Msgf(format, args...)
 
+	if err == nil {
+		return fmt.Errorf(format, args...)
+	}
+
 	err_msg := err.Error() + ": %v"
 	err_args := append(args, err)
 
