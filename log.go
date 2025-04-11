@@ -45,6 +45,7 @@ var (
 	logger          = getLogger("jetkvm")
 	cloudLogger     = getLogger("cloud")
 	websocketLogger = getLogger("websocket")
+	webrtcLogger    = getLogger("webrtc")
 	nativeLogger    = getLogger("native")
 	ntpLogger       = getLogger("ntp")
 	jsonRpcLogger   = getLogger("jsonrpc")

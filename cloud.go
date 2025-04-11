@@ -19,6 +19,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog"
 )
 
 type CloudRegisterRequest struct {
@@ -355,7 +356,14 @@ func authenticateSession(ctx context.Context, c *websocket.Conn, req WebRTCSessi
 	return nil
 }
 
-func handleSessionRequest(ctx context.Context, c *websocket.Conn, req WebRTCSessionRequest, isCloudConnection bool, source string) error {
+func handleSessionRequest(
+	ctx context.Context,
+	c *websocket.Conn,
+	req WebRTCSessionRequest,
+	isCloudConnection bool,
+	source string,
+	scopedLogger *zerolog.Logger,
+) error {
 	var sourceType string
 	if isCloudConnection {
 		sourceType = "cloud"
@@ -381,6 +389,7 @@ func handleSessionRequest(ctx context.Context, c *websocket.Conn, req WebRTCSess
 		IsCloud:    isCloudConnection,
 		LocalIP:    req.IP,
 		ICEServers: req.ICEServers,
+		Logger:     scopedLogger,
 	})
 	if err != nil {
 		_ = wsjson.Write(context.Background(), c, gin.H{"error": err})
