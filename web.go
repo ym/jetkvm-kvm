@@ -189,6 +189,7 @@ var (
 func handleLocalWebRTCSignal(c *gin.Context) {
 	// get the source from the request
 	source := c.ClientIP()
+	connectionID := uuid.New().String()
 
 	scopedLogger := websocketLogger.With().
 		Str("component", "websocket").
@@ -226,19 +227,22 @@ func handleLocalWebRTCSignal(c *gin.Context) {
 		return
 	}
 
-	err = handleWebRTCSignalWsMessages(wsCon, false, source, &scopedLogger)
+	err = handleWebRTCSignalWsMessages(wsCon, false, source, connectionID, &scopedLogger)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 }
 
-func handleWebRTCSignalWsMessages(wsCon *websocket.Conn, isCloudConnection bool, source string, scopedLogger *zerolog.Logger) error {
+func handleWebRTCSignalWsMessages(
+	wsCon *websocket.Conn,
+	isCloudConnection bool,
+	source string,
+	connectionID string,
+	scopedLogger *zerolog.Logger,
+) error {
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
-
-	// Add connection tracking to detect reconnections
-	connectionID := uuid.New().String()
 
 	// connection type
 	var sourceType string
