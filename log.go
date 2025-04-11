@@ -50,8 +50,8 @@ var (
 	displayLogger   = getLogger("display")
 	usbLogger       = getLogger("usb")
 	jsonRpcLogger   = getLogger("jsonrpc")
+	watchdogLogger  = getLogger("watchdog")
 	websecureLogger = getLogger("websecure")
-
 	// external components
 	ginLogger = getLogger("gin")
 )
