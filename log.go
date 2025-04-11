@@ -52,6 +52,7 @@ var (
 	jsonRpcLogger   = getLogger("jsonrpc")
 	watchdogLogger  = getLogger("watchdog")
 	websecureLogger = getLogger("websecure")
+	otaLogger       = getLogger("ota")
 	// external components
 	ginLogger = getLogger("gin")
 )
