@@ -218,6 +218,7 @@ var (
 	websocketLogger = rootLogger.getLogger("websocket")
 	webrtcLogger    = rootLogger.getLogger("webrtc")
 	nativeLogger    = rootLogger.getLogger("native")
+	nbdLogger       = rootLogger.getLogger("nbd")
 	ntpLogger       = rootLogger.getLogger("ntp")
 	jsonRpcLogger   = rootLogger.getLogger("jsonrpc")
 	watchdogLogger  = rootLogger.getLogger("watchdog")
