@@ -391,7 +391,12 @@ func TryUpdate(ctx context.Context, deviceId string, includePreRelease bool) err
 		otaState.SystemDownloadProgress = 1
 		triggerOTAStateUpdate()
 
-		err = verifyFile("/userdata/jetkvm/update_system.tar", remote.SystemHash, &otaState.SystemVerificationProgress)
+		err = verifyFile(
+			"/userdata/jetkvm/update_system.tar",
+			remote.SystemHash,
+			&otaState.SystemVerificationProgress,
+			&scopedLogger,
+		)
 		if err != nil {
 			otaState.Error = fmt.Sprintf("Error verifying system update hash: %v", err)
 			scopedLogger.Error().Err(err).Msg("Error verifying system update hash")
