@@ -3,6 +3,7 @@ package kvm
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -91,7 +92,11 @@ func CallCtrlAction(action string, params map[string]interface{}) (*CtrlResponse
 	case response := <-responseChan:
 		delete(ongoingRequests, seq)
 		if response.Error != "" {
-			return nil, ErrorfL(&scopedLogger, "error native response: %s", fmt.Errorf(response.Error))
+			return nil, ErrorfL(
+				&scopedLogger,
+				"error native response: %s",
+				errors.New(response.Error),
+			)
 		}
 		return response, nil
 	case <-time.After(5 * time.Second):
