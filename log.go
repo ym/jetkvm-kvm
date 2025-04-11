@@ -49,8 +49,11 @@ var (
 	ntpLogger       = getLogger("ntp")
 	displayLogger   = getLogger("display")
 	usbLogger       = getLogger("usb")
-	ginLogger       = getLogger("gin")
+	jsonRpcLogger   = getLogger("jsonrpc")
 	websecureLogger = getLogger("websecure")
+
+	// external components
+	ginLogger = getLogger("gin")
 )
 
 func updateLogLevel() {
