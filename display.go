@@ -228,7 +228,7 @@ func startBacklightTickers() {
 		defer dimTicker.Stop()
 
 		go func() {
-			for { //nolint:gosimple
+			for { //nolint:staticcheck
 				select {
 				case <-dimTicker.C:
 					tick_displayDim()
@@ -243,7 +243,7 @@ func startBacklightTickers() {
 		defer offTicker.Stop()
 
 		go func() {
-			for { //nolint:gosimple
+			for { //nolint:staticcheck
 				select {
 				case <-offTicker.C:
 					tick_displayOff()
