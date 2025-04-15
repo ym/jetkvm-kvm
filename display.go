@@ -33,50 +33,153 @@ func switchToScreen(screen string) {
 
 var displayedTexts = make(map[string]string)
 
+func lvObjSetState(objName string, state string) (*CtrlResponse, error) {
+	return CallCtrlAction("lv_obj_set_state", map[string]interface{}{"obj": objName, "state": state})
+}
+
+func lvObjAddFlag(objName string, flag string) (*CtrlResponse, error) {
+	return CallCtrlAction("lv_obj_add_flag", map[string]interface{}{"obj": objName, "flag": flag})
+}
+
+func lvObjClearFlag(objName string, flag string) (*CtrlResponse, error) {
+	return CallCtrlAction("lv_obj_clear_flag", map[string]interface{}{"obj": objName, "flag": flag})
+}
+
+func lvObjHide(objName string) (*CtrlResponse, error) {
+	return lvObjAddFlag(objName, "LV_OBJ_FLAG_HIDDEN")
+}
+
+func lvObjShow(objName string) (*CtrlResponse, error) {
+	return lvObjClearFlag(objName, "LV_OBJ_FLAG_HIDDEN")
+}
+
+func lvObjSetOpacity(objName string, opacity int) (*CtrlResponse, error) { // nolint:unused
+	return CallCtrlAction("lv_obj_set_style_opa_layered", map[string]interface{}{"obj": objName, "opa": opacity})
+}
+
+func lvObjFadeIn(objName string, duration uint32) (*CtrlResponse, error) {
+	return CallCtrlAction("lv_obj_fade_in", map[string]interface{}{"obj": objName, "time": duration})
+}
+
+func lvObjFadeOut(objName string, duration uint32) (*CtrlResponse, error) {
+	return CallCtrlAction("lv_obj_fade_out", map[string]interface{}{"obj": objName, "time": duration})
+}
+
+func lvLabelSetText(objName string, text string) (*CtrlResponse, error) {
+	return CallCtrlAction("lv_label_set_text", map[string]interface{}{"obj": objName, "text": text})
+}
+
+func lvImgSetSrc(objName string, src string) (*CtrlResponse, error) {
+	return CallCtrlAction("lv_img_set_src", map[string]interface{}{"obj": objName, "src": src})
+}
+
 func updateLabelIfChanged(objName string, newText string) {
 	if newText != "" && newText != displayedTexts[objName] {
-		_, _ = CallCtrlAction("lv_label_set_text", map[string]interface{}{"obj": objName, "text": newText})
+		_, _ = lvLabelSetText(objName, newText)
 		displayedTexts[objName] = newText
 	}
 }
 
 func switchToScreenIfDifferent(screenName string) {
-	displayLogger.Info().Str("from", currentScreen).Str("to", screenName).Msg("switching screen")
 	if currentScreen != screenName {
+		displayLogger.Info().Str("from", currentScreen).Str("to", screenName).Msg("switching screen")
 		switchToScreen(screenName)
 	}
 }
 
+var (
+	cloudBlinkLock    sync.Mutex = sync.Mutex{}
+	cloudBlinkStopped bool
+	cloudBlinkTicker  *time.Ticker
+)
+
 func updateDisplay() {
-	updateLabelIfChanged("ui_Home_Content_Ip", networkState.IPv4)
+	updateLabelIfChanged("ui_Home_Content_Ip", networkState.IPv4String())
 	if usbState == "configured" {
 		updateLabelIfChanged("ui_Home_Footer_Usb_Status_Label", "Connected")
-		_, _ = CallCtrlAction("lv_obj_set_state", map[string]interface{}{"obj": "ui_Home_Footer_Usb_Status_Label", "state": "LV_STATE_DEFAULT"})
+		_, _ = lvObjSetState("ui_Home_Footer_Usb_Status_Label", "LV_STATE_DEFAULT")
 	} else {
 		updateLabelIfChanged("ui_Home_Footer_Usb_Status_Label", "Disconnected")
-		_, _ = CallCtrlAction("lv_obj_set_state", map[string]interface{}{"obj": "ui_Home_Footer_Usb_Status_Label", "state": "LV_STATE_USER_2"})
+		_, _ = lvObjSetState("ui_Home_Footer_Usb_Status_Label", "LV_STATE_USER_2")
 	}
 	if lastVideoState.Ready {
 		updateLabelIfChanged("ui_Home_Footer_Hdmi_Status_Label", "Connected")
-		_, _ = CallCtrlAction("lv_obj_set_state", map[string]interface{}{"obj": "ui_Home_Footer_Hdmi_Status_Label", "state": "LV_STATE_DEFAULT"})
+		_, _ = lvObjSetState("ui_Home_Footer_Hdmi_Status_Label", "LV_STATE_DEFAULT")
 	} else {
 		updateLabelIfChanged("ui_Home_Footer_Hdmi_Status_Label", "Disconnected")
-		_, _ = CallCtrlAction("lv_obj_set_state", map[string]interface{}{"obj": "ui_Home_Footer_Hdmi_Status_Label", "state": "LV_STATE_USER_2"})
+		_, _ = lvObjSetState("ui_Home_Footer_Hdmi_Status_Label", "LV_STATE_USER_2")
 	}
 	updateLabelIfChanged("ui_Home_Header_Cloud_Status_Label", fmt.Sprintf("%d active", actionSessions))
-	if networkState.Up {
+
+	if networkState.IsUp() {
 		switchToScreenIfDifferent("ui_Home_Screen")
 	} else {
 		switchToScreenIfDifferent("ui_No_Network_Screen")
 	}
+
+	if cloudConnectionState == CloudConnectionStateNotConfigured {
+		_, _ = lvObjHide("ui_Home_Header_Cloud_Status_Icon")
+	} else {
+		_, _ = lvObjShow("ui_Home_Header_Cloud_Status_Icon")
+	}
+
+	switch cloudConnectionState {
+	case CloudConnectionStateDisconnected:
+		_, _ = lvImgSetSrc("ui_Home_Header_Cloud_Status_Icon", "cloud_disconnected.png")
+		stopCloudBlink()
+	case CloudConnectionStateConnecting:
+		_, _ = lvImgSetSrc("ui_Home_Header_Cloud_Status_Icon", "cloud.png")
+		startCloudBlink()
+	case CloudConnectionStateConnected:
+		_, _ = lvImgSetSrc("ui_Home_Header_Cloud_Status_Icon", "cloud.png")
+		stopCloudBlink()
+	}
+}
+
+func startCloudBlink() {
+	if cloudBlinkTicker == nil {
+		cloudBlinkTicker = time.NewTicker(2 * time.Second)
+	} else {
+		// do nothing if the blink isn't stopped
+		if cloudBlinkStopped {
+			cloudBlinkLock.Lock()
+			defer cloudBlinkLock.Unlock()
+
+			cloudBlinkStopped = false
+			cloudBlinkTicker.Reset(2 * time.Second)
+		}
+	}
+
+	go func() {
+		for range cloudBlinkTicker.C {
+			if cloudConnectionState != CloudConnectionStateConnecting {
+				continue
+			}
+			_, _ = lvObjFadeOut("ui_Home_Header_Cloud_Status_Icon", 1000)
+			time.Sleep(1000 * time.Millisecond)
+			_, _ = lvObjFadeIn("ui_Home_Header_Cloud_Status_Icon", 1000)
+			time.Sleep(1000 * time.Millisecond)
+		}
+	}()
+}
+
+func stopCloudBlink() {
+	if cloudBlinkTicker != nil {
+		cloudBlinkTicker.Stop()
+	}
+
+	cloudBlinkLock.Lock()
+	defer cloudBlinkLock.Unlock()
+	cloudBlinkStopped = true
 }
 
 var (
 	displayInited     = false
 	displayUpdateLock = sync.Mutex{}
+	waitDisplayUpdate = sync.Mutex{}
 )
 
-func requestDisplayUpdate() {
+func requestDisplayUpdate(shouldWakeDisplay bool) {
 	displayUpdateLock.Lock()
 	defer displayUpdateLock.Unlock()
 
@@ -85,16 +188,26 @@ func requestDisplayUpdate() {
 		return
 	}
 	go func() {
-		wakeDisplay(false)
-		displayLogger.Info().Msg("display updating")
+		if shouldWakeDisplay {
+			wakeDisplay(false)
+		}
+		displayLogger.Debug().Msg("display updating")
 		//TODO: only run once regardless how many pending updates
 		updateDisplay()
 	}()
 }
 
+func waitCtrlAndRequestDisplayUpdate(shouldWakeDisplay bool) {
+	waitDisplayUpdate.Lock()
+	defer waitDisplayUpdate.Unlock()
+
+	waitCtrlClientConnected()
+	requestDisplayUpdate(shouldWakeDisplay)
+}
+
 func updateStaticContents() {
 	//contents that never change
-	updateLabelIfChanged("ui_Home_Content_Mac", networkState.MAC)
+	updateLabelIfChanged("ui_Home_Content_Mac", networkState.MACString())
 	systemVersion, appVersion, err := GetLocalVersion()
 	if err == nil {
 		updateLabelIfChanged("ui_About_Content_Operating_System_Version_ContentLabel", systemVersion.String())
@@ -265,7 +378,7 @@ func init() {
 		displayLogger.Info().Msg("display inited")
 		startBacklightTickers()
 		wakeDisplay(true)
-		requestDisplayUpdate()
+		requestDisplayUpdate(true)
 	}()
 
 	go watchTsEvents()

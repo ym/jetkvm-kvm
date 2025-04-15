@@ -139,10 +139,39 @@ var (
 	)
 )
 
+type CloudConnectionState uint8
+
+const (
+	CloudConnectionStateNotConfigured CloudConnectionState = iota
+	CloudConnectionStateDisconnected
+	CloudConnectionStateConnecting
+	CloudConnectionStateConnected
+)
+
 var (
+	cloudConnectionState     CloudConnectionState = CloudConnectionStateNotConfigured
+	cloudConnectionStateLock                      = &sync.Mutex{}
+
 	cloudDisconnectChan chan error
 	cloudDisconnectLock = &sync.Mutex{}
 )
+
+func setCloudConnectionState(state CloudConnectionState) {
+	cloudConnectionStateLock.Lock()
+	defer cloudConnectionStateLock.Unlock()
+
+	if cloudConnectionState == CloudConnectionStateDisconnected &&
+		(config.CloudToken == "" || config.CloudURL == "") {
+		state = CloudConnectionStateNotConfigured
+	}
+
+	previousState := cloudConnectionState
+	cloudConnectionState = state
+
+	go waitCtrlAndRequestDisplayUpdate(
+		previousState != state,
+	)
+}
 
 func wsResetMetrics(established bool, sourceType string, source string) {
 	metricConnectionLastPingTimestamp.WithLabelValues(sourceType, source).Set(-1)
@@ -285,6 +314,8 @@ func runWebsocketClient() error {
 		wsURL.Scheme = "wss"
 	}
 
+	setCloudConnectionState(CloudConnectionStateConnecting)
+
 	header := http.Header{}
 	header.Set("X-Device-ID", GetDeviceID())
 	header.Set("X-App-Version", builtAppVersion)
@@ -302,20 +333,26 @@ func runWebsocketClient() error {
 	c, resp, err := websocket.Dial(dialCtx, wsURL.String(), &websocket.DialOptions{
 		HTTPHeader: header,
 		OnPingReceived: func(ctx context.Context, payload []byte) bool {
-			scopedLogger.Info().Bytes("payload", payload).Int("length", len(payload)).Msg("ping frame received")
+			scopedLogger.Debug().Bytes("payload", payload).Int("length", len(payload)).Msg("ping frame received")
 
 			metricConnectionTotalPingReceivedCount.WithLabelValues("cloud", wsURL.Host).Inc()
 			metricConnectionLastPingReceivedTimestamp.WithLabelValues("cloud", wsURL.Host).SetToCurrentTime()
+
+			setCloudConnectionState(CloudConnectionStateConnected)
 
 			return true
 		},
 	})
 
-	// get the request id from the response header
-	connectionId := resp.Header.Get("X-Request-ID")
-	if connectionId == "" {
-		connectionId = resp.Header.Get("Cf-Ray")
+	var connectionId string
+	if resp != nil {
+		// get the request id from the response header
+		connectionId = resp.Header.Get("X-Request-ID")
+		if connectionId == "" {
+			connectionId = resp.Header.Get("Cf-Ray")
+		}
 	}
+
 	if connectionId == "" {
 		connectionId = uuid.New().String()
 		scopedLogger.Warn().
@@ -332,6 +369,8 @@ func runWebsocketClient() error {
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			cloudLogger.Info().Msg("websocket connection canceled")
+			setCloudConnectionState(CloudConnectionStateDisconnected)
+
 			return nil
 		}
 		return err
@@ -450,14 +489,14 @@ func RunWebsocketClient() {
 		}
 
 		// If the network is not up, well, we can't connect to the cloud.
-		if !networkState.Up {
-			cloudLogger.Warn().Msg("waiting for network to be up, will retry in 3 seconds")
+		if !networkState.IsOnline() {
+			cloudLogger.Warn().Msg("waiting for network to be online, will retry in 3 seconds")
 			time.Sleep(3 * time.Second)
 			continue
 		}
 
 		// If the system time is not synchronized, the API request will fail anyway because the TLS handshake will fail.
-		if isTimeSyncNeeded() && !timeSyncSuccess {
+		if isTimeSyncNeeded() && !timeSync.IsSyncSuccess() {
 			cloudLogger.Warn().Msg("system time is not synced, will retry in 3 seconds")
 			time.Sleep(3 * time.Second)
 			continue
@@ -519,6 +558,8 @@ func rpcDeregisterDevice() error {
 
 		cloudLogger.Info().Msg("device deregistered, disconnecting from cloud")
 		disconnectCloud(fmt.Errorf("device deregistered"))
+
+		setCloudConnectionState(CloudConnectionStateNotConfigured)
 
 		return nil
 	}

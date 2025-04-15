@@ -96,7 +96,11 @@ func (s *CertStore) loadCertificate(hostname string) {
 
 	s.certificates[hostname] = &cert
 
-	s.log.Info().Str("hostname", hostname).Msg("Loaded certificate")
+	if hostname == selfSignerCAMagicName {
+		s.log.Info().Msg("loaded CA certificate")
+	} else {
+		s.log.Info().Str("hostname", hostname).Msg("loaded certificate")
+	}
 }
 
 // GetCertificate returns the certificate for the given hostname
@@ -131,7 +135,7 @@ func (s *CertStore) ValidateAndSaveCertificate(hostname string, cert string, key
 			if !ignoreWarning {
 				return nil, fmt.Errorf("certificate does not match hostname: %w", err)
 			}
-			s.log.Warn().Err(err).Msg("Certificate does not match hostname")
+			s.log.Warn().Err(err).Msg("certificate does not match hostname")
 		}
 	}
 

@@ -8,13 +8,10 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/jetkvm/kvm/resource"
-	"github.com/rs/zerolog"
 
 	"github.com/pion/webrtc/v4/pkg/media"
 )
@@ -34,19 +31,6 @@ type CtrlResponse struct {
 	Result map[string]interface{} `json:"result,omitempty"`
 	Event  string                 `json:"event,omitempty"`
 	Data   json.RawMessage        `json:"data,omitempty"`
-}
-
-type nativeOutput struct {
-	mu     *sync.Mutex
-	logger *zerolog.Event
-}
-
-func (w *nativeOutput) Write(p []byte) (n int, err error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	w.logger.Msg(string(p))
-	return len(p), nil
 }
 
 type EventHandler func(event CtrlResponse)
@@ -262,30 +246,8 @@ func ExtractAndRunNativeBin() error {
 		return fmt.Errorf("failed to make binary executable: %w", err)
 	}
 	// Run the binary in the background
-	cmd := exec.Command(binaryPath)
-
-	nativeOutputLock := sync.Mutex{}
-	nativeStdout := &nativeOutput{
-		mu:     &nativeOutputLock,
-		logger: nativeLogger.Info().Str("pipe", "stdout"),
-	}
-	nativeStderr := &nativeOutput{
-		mu:     &nativeOutputLock,
-		logger: nativeLogger.Info().Str("pipe", "stderr"),
-	}
-
-	// Redirect stdout and stderr to the current process
-	cmd.Stdout = nativeStdout
-	cmd.Stderr = nativeStderr
-
-	// Set the process group ID so we can kill the process and its children when this process exits
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid:   true,
-		Pdeathsig: syscall.SIGKILL,
-	}
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
+	cmd, err := startNativeBinary(binaryPath)
+	if err != nil {
 		return fmt.Errorf("failed to start binary: %w", err)
 	}
 
@@ -335,7 +297,10 @@ func ensureBinaryUpdated(destPath string) error {
 
 	_, err = os.Stat(destPath)
 	if shouldOverwrite(destPath, srcHash) || err != nil {
-		nativeLogger.Info().Msg("writing jetkvm_native")
+		nativeLogger.Info().
+			Interface("hash", srcHash).
+			Msg("writing jetkvm_native")
+
 		_ = os.Remove(destPath)
 		destFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_RDWR, 0755)
 		if err != nil {

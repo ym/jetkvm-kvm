@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/http/pprof"
 	"path/filepath"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 	gin_logger "github.com/gin-contrib/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jetkvm/kvm/internal/logging"
 	"github.com/pion/webrtc/v4"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -102,6 +104,27 @@ func setupRouter() *gin.Engine {
 
 	// A Prometheus metrics endpoint.
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
+	// Developer mode protected routes
+	developerModeRouter := r.Group("/developer/")
+	developerModeRouter.Use(basicAuthProtectedMiddleware(true))
+	{
+		// pprof
+		developerModeRouter.GET("/pprof/", gin.WrapF(pprof.Index))
+		developerModeRouter.GET("/pprof/cmdline", gin.WrapF(pprof.Cmdline))
+		developerModeRouter.GET("/pprof/profile", gin.WrapF(pprof.Profile))
+		developerModeRouter.POST("/pprof/symbol", gin.WrapF(pprof.Symbol))
+		developerModeRouter.GET("/pprof/symbol", gin.WrapF(pprof.Symbol))
+		developerModeRouter.GET("/pprof/trace", gin.WrapF(pprof.Trace))
+		developerModeRouter.GET("/pprof/allocs", gin.WrapH(pprof.Handler("allocs")))
+		developerModeRouter.GET("/pprof/block", gin.WrapH(pprof.Handler("block")))
+		developerModeRouter.GET("/pprof/goroutine", gin.WrapH(pprof.Handler("goroutine")))
+		developerModeRouter.GET("/pprof/heap", gin.WrapH(pprof.Handler("heap")))
+		developerModeRouter.GET("/pprof/mutex", gin.WrapH(pprof.Handler("mutex")))
+		developerModeRouter.GET("/pprof/threadcreate", gin.WrapH(pprof.Handler("threadcreate")))
+
+		logging.AttachSSEHandler(developerModeRouter)
+	}
 
 	// Protected routes (allows both password and noPassword modes)
 	protected := r.Group("/")
@@ -203,7 +226,7 @@ func handleLocalWebRTCSignal(c *gin.Context) {
 	wsOptions := &websocket.AcceptOptions{
 		InsecureSkipVerify: true, // Allow connections from any origin
 		OnPingReceived: func(ctx context.Context, payload []byte) bool {
-			scopedLogger.Info().Bytes("payload", payload).Msg("ping frame received")
+			scopedLogger.Debug().Bytes("payload", payload).Msg("ping frame received")
 
 			metricConnectionTotalPingReceivedCount.WithLabelValues("local", source).Inc()
 			metricConnectionLastPingReceivedTimestamp.WithLabelValues("local", source).SetToCurrentTime()
@@ -242,7 +265,12 @@ func handleWebRTCSignalWsMessages(
 	scopedLogger *zerolog.Logger,
 ) error {
 	runCtx, cancelRun := context.WithCancel(context.Background())
-	defer cancelRun()
+	defer func() {
+		if isCloudConnection {
+			setCloudConnectionState(CloudConnectionStateDisconnected)
+		}
+		cancelRun()
+	}()
 
 	// connection type
 	var sourceType string
@@ -459,11 +487,51 @@ func protectedMiddleware() gin.HandlerFunc {
 	}
 }
 
+func sendErrorJsonThenAbort(c *gin.Context, status int, message string) {
+	c.JSON(status, gin.H{"error": message})
+	c.Abort()
+}
+
+func basicAuthProtectedMiddleware(requireDeveloperMode bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if requireDeveloperMode {
+			devModeState, err := rpcGetDevModeState()
+			if err != nil {
+				sendErrorJsonThenAbort(c, http.StatusInternalServerError, "Failed to get developer mode state")
+				return
+			}
+
+			if !devModeState.Enabled {
+				sendErrorJsonThenAbort(c, http.StatusUnauthorized, "Developer mode is not enabled")
+				return
+			}
+		}
+
+		if config.LocalAuthMode == "noPassword" {
+			sendErrorJsonThenAbort(c, http.StatusForbidden, "The resource is not available in noPassword mode")
+			return
+		}
+
+		// calculate basic auth credentials
+		_, password, ok := c.Request.BasicAuth()
+		if !ok {
+			c.Header("WWW-Authenticate", "Basic realm=\"JetKVM\"")
+			sendErrorJsonThenAbort(c, http.StatusUnauthorized, "Basic auth is required")
+			return
+		}
+
+		err := bcrypt.CompareHashAndPassword([]byte(config.HashedPassword), []byte(password))
+		if err != nil {
+			sendErrorJsonThenAbort(c, http.StatusUnauthorized, "Invalid password")
+			return
+		}
+
+		c.Next()
+	}
+}
+
 func RunWebServer() {
 	r := setupRouter()
-	//if strings.Contains(builtAppVersion, "-dev") {
-	//	pprof.Register(r)
-	//}
 	err := r.Run(":80")
 	if err != nil {
 		panic(err)

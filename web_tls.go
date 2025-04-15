@@ -54,7 +54,7 @@ func initCertStore() {
 func getCertificate(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	switch config.TLSMode {
 	case "self-signed":
-		if isTimeSyncNeeded() || !timeSyncSuccess {
+		if isTimeSyncNeeded() || !timeSync.IsSyncSuccess() {
 			return nil, fmt.Errorf("time is not synced")
 		}
 		return certSigner.GetCertificate(info)
@@ -174,7 +174,7 @@ func runWebSecureServer() {
 			websecureLogger.Info().Msg("Shutting down websecure server")
 			err := server.Shutdown(context.Background())
 			if err != nil {
-				websecureLogger.Error().Err(err).Msg("Failed to shutdown websecure server")
+				websecureLogger.Error().Err(err).Msg("failed to shutdown websecure server")
 			}
 		}
 	}()

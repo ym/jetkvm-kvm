@@ -15,28 +15,54 @@ var appCtx context.Context
 
 func Main() {
 	LoadConfig()
-	logger.Debug().Msg("config loaded")
 
 	var cancel context.CancelFunc
 	appCtx, cancel = context.WithCancel(context.Background())
 	defer cancel()
-	logger.Info().Msg("starting JetKvm")
+
+	systemVersionLocal, appVersionLocal, err := GetLocalVersion()
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to get local version")
+	}
+
+	logger.Info().
+		Interface("system_version", systemVersionLocal).
+		Interface("app_version", appVersionLocal).
+		Msg("starting JetKVM")
 
 	go runWatchdog()
 	go confirmCurrentSystem()
 
 	http.DefaultClient.Timeout = 1 * time.Minute
 
-	err := rootcerts.UpdateDefaultTransport()
+	err = rootcerts.UpdateDefaultTransport()
 	if err != nil {
-		logger.Warn().Err(err).Msg("failed to load CA certs")
+		logger.Warn().Err(err).Msg("failed to load Root CA certificates")
+	}
+	logger.Info().
+		Int("ca_certs_loaded", len(rootcerts.Certs())).
+		Msg("loaded Root CA certificates")
+
+	// Initialize network
+	if err := initNetwork(); err != nil {
+		logger.Error().Err(err).Msg("failed to initialize network")
+		os.Exit(1)
 	}
 
-	initNetwork()
+	// Initialize time sync
+	initTimeSync()
+	timeSync.Start()
 
-	go TimeSyncLoop()
+	// Initialize mDNS
+	if err := initMdns(); err != nil {
+		logger.Error().Err(err).Msg("failed to initialize mDNS")
+		os.Exit(1)
+	}
 
+	// Initialize native ctrl socket server
 	StartNativeCtrlSocketServer()
+
+	// Initialize native video socket server
 	StartNativeVideoSocketServer()
 
 	initPrometheus()

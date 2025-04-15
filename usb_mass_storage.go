@@ -62,7 +62,11 @@ func onDiskMessage(msg webrtc.DataChannelMessage) {
 func mountImage(imagePath string) error {
 	err := setMassStorageImage("")
 	if err != nil {
-		return fmt.Errorf("remove Mass Storage Image Error: %w", err)
+		return fmt.Errorf("remove mass storage image error: %w", err)
+	}
+	err = setMassStorageImage(imagePath)
+	if err != nil {
+		return fmt.Errorf("set mass storage image error: %w", err)
 	}
 	err = setMassStorageImage(imagePath)
 	if err != nil {
@@ -477,7 +481,6 @@ func handleUploadChannel(d *webrtc.DataChannel) {
 		totalBytesWritten += int64(bytesWritten)
 
 		sendProgress := time.Since(lastProgressTime) >= 200*time.Millisecond
-
 		if totalBytesWritten >= pendingUpload.Size {
 			sendProgress = true
 			close(uploadComplete)
