@@ -6,6 +6,7 @@ import {
   useMouseStore,
   useRTCStore,
   useSettingsStore,
+  useUiStore,
   useVideoStore,
 } from "@/hooks/stores";
 import { keys, modifiers } from "@/keyboardMappings";
@@ -17,11 +18,13 @@ import MacroBar from "@/components/MacroBar";
 import InfoBar from "@components/InfoBar";
 import useKeyboard from "@/hooks/useKeyboard";
 import { useJsonRpc } from "@/hooks/useJsonRpc";
+import notifications from "@/notifications";
 
 import {
   HDMIErrorOverlay,
   LoadingVideoOverlay,
   NoAutoplayPermissionsOverlay,
+  PointerLockBar,
 } from "./VideoOverlay";
 
 export default function WebRTCVideo() {
@@ -30,7 +33,7 @@ export default function WebRTCVideo() {
   const mediaStream = useRTCStore(state => state.mediaStream);
   const [isPlaying, setIsPlaying] = useState(false);
   const peerConnectionState = useRTCStore(state => state.peerConnectionState);
-
+  const [isPointerLockActive, setIsPointerLockActive] = useState(false);
   // Store hooks
   const settings = useSettingsStore();
   const { sendKeyboardEvent, resetKeyboardState } = useKeyboard();
@@ -53,14 +56,13 @@ export default function WebRTCVideo() {
   const hdmiError = ["no_lock", "no_signal", "out_of_range"].includes(hdmiState);
   const isVideoLoading = !isPlaying;
 
-  // console.log("peerConnection?.connectionState", peerConnection?.connectionState);
-
   // Keyboard related states
   const { setIsNumLockActive, setIsCapsLockActive, setIsScrollLockActive } =
     useHidStore();
 
   // Misc states and hooks
   const [blockWheelEvent, setBlockWheelEvent] = useState(false);
+  const disableVideoFocusTrap = useUiStore(state => state.disableVideoFocusTrap);
   const [send] = useJsonRpc();
 
   // Video-related
@@ -97,6 +99,64 @@ export default function WebRTCVideo() {
     [setVideoClientSize, updateVideoSizeStore, setVideoSize],
   );
 
+  // Pointer lock and keyboard lock related
+  const isPointerLockPossible = window.location.protocol === "https:";
+
+  const checkNavigatorPermissions = useCallback(async (permissionName: string) => {
+    const name = permissionName as PermissionName;
+    const { state } = await navigator.permissions.query({ name });
+    return state === "granted";
+  }, []);
+
+  const requestPointerLock = useCallback(async () => {
+    if (document.pointerLockElement) return;
+
+    const isPointerLockGranted = await checkNavigatorPermissions("pointer-lock");
+    if (isPointerLockGranted && settings.mouseMode === "relative") {
+      videoElm.current?.requestPointerLock();
+    }
+  }, [checkNavigatorPermissions, settings.mouseMode]);
+
+  useEffect(() => {
+    if (!isPointerLockPossible || !videoElm.current) return;
+
+    const handlePointerLockChange = () => {
+      if (document.pointerLockElement) {
+        notifications.success("Pointer lock Enabled, hold escape to exit");
+        setIsPointerLockActive(true);
+      } else {
+        notifications.success("Pointer lock disabled");
+        setIsPointerLockActive(false);
+      }
+    };
+
+    const abortController = new AbortController();
+    const signal = abortController.signal;
+
+    document.addEventListener("pointerlockchange", handlePointerLockChange, { signal });
+
+    return () => {
+      abortController.abort();
+    };
+  }, [isPointerLockPossible, videoElm]);
+
+  const requestFullscreen = useCallback(async () => {
+    videoElm.current?.requestFullscreen({
+      navigationUI: "show",
+    });
+
+    // we do not care about pointer lock if it's for fullscreen
+    await requestPointerLock();
+
+    const isKeyboardLockGranted = await checkNavigatorPermissions("keyboard-lock");
+    if (isKeyboardLockGranted) {
+      if ("keyboard" in navigator) {
+        // @ts-ignore
+        await navigator.keyboard.lock();
+      }
+    }
+  }, [requestPointerLock, checkNavigatorPermissions]);
+
   // Mouse-related
   const calcDelta = (pos: number) => (Math.abs(pos) < 10 ? pos * 2 : pos);
   const sendRelMouseMovement = useCallback(
@@ -113,12 +173,18 @@ export default function WebRTCVideo() {
   const relMouseMoveHandler = useCallback(
     (e: MouseEvent) => {
       if (settings.mouseMode !== "relative") return;
+      if (isPointerLockActive === false && isPointerLockPossible === true) return;
 
       // Send mouse movement
       const { buttons } = e;
       sendRelMouseMovement(e.movementX, e.movementY, buttons);
     },
-    [sendRelMouseMovement, settings.mouseMode],
+    [
+      isPointerLockActive,
+      isPointerLockPossible,
+      sendRelMouseMovement,
+      settings.mouseMode,
+    ],
   );
 
   const sendAbsMouseMovement = useCallback(
@@ -294,7 +360,8 @@ export default function WebRTCVideo() {
       //   console.log("KEYUP: Not focusing on the video", document.activeElement);
       //   return;
       // }
-      console.log(document.activeElement);
+
+      // console.log(document.activeElement);
 
       setIsNumLockActive(e.getModifierState("NumLock"));
       setIsCapsLockActive(e.getModifierState("CapsLock"));
@@ -512,36 +579,51 @@ export default function WebRTCVideo() {
 
   // Setup Relative Mouse Events
   const containerRef = useRef<HTMLDivElement>(null);
+
   useEffect(
     function setupRelativeMouseEventListeners() {
       if (settings.mouseMode !== "relative") return;
+      // Relative mouse mode should only be active if the pointer lock is active and Pointer Lock is possible
+
+      const videoElmRefValue = videoElm.current;
+      if (!videoElmRefValue) return;
 
       const abortController = new AbortController();
       const signal = abortController.signal;
 
-      // We bind to the larger container in relative mode because of delta between the acceleration of the local
-      // mouse and the mouse movement of the remote mouse. This simply makes it a bit less painful to use.
-      // When we get Pointer Lock support, we can remove this.
-      const containerElm = containerRef.current;
-      if (!containerElm) return;
-
-      containerElm.addEventListener("mousemove", relMouseMoveHandler, { signal });
-      containerElm.addEventListener("pointerdown", relMouseMoveHandler, { signal });
-      containerElm.addEventListener("pointerup", relMouseMoveHandler, { signal });
-
-      containerElm.addEventListener("wheel", mouseWheelHandler, {
+      videoElmRefValue.addEventListener("mousemove", relMouseMoveHandler, { signal });
+      videoElmRefValue.addEventListener("pointerdown", relMouseMoveHandler, { signal });
+      videoElmRefValue.addEventListener("pointerup", relMouseMoveHandler, { signal });
+      videoElmRefValue.addEventListener(
+        "click",
+        () => {
+          if (isPointerLockPossible && !document.pointerLockElement) {
+            requestPointerLock();
+          }
+        },
+        { signal },
+      );
+      videoElmRefValue.addEventListener("wheel", mouseWheelHandler, {
         signal,
         passive: true,
       });
 
       const preventContextMenu = (e: MouseEvent) => e.preventDefault();
-      containerElm.addEventListener("contextmenu", preventContextMenu, { signal });
+      videoElmRefValue.addEventListener("contextmenu", preventContextMenu, { signal });
 
       return () => {
         abortController.abort();
       };
     },
-    [settings.mouseMode, relMouseMoveHandler, mouseWheelHandler],
+    [
+      settings.mouseMode,
+      relMouseMoveHandler,
+      mouseWheelHandler,
+      disableVideoFocusTrap,
+      requestPointerLock,
+      isPointerLockPossible,
+      isPointerLockActive,
+    ],
   );
 
   const hasNoAutoPlayPermissions = useMemo(() => {
@@ -552,33 +634,43 @@ export default function WebRTCVideo() {
     return true;
   }, [peerConnection?.connectionState, isPlaying, hdmiError, videoHeight, videoWidth]);
 
+  const showPointerLockBar = useMemo(() => {
+    if (settings.mouseMode !== "relative") return false;
+    if (!isPointerLockPossible) return false;
+    if (isPointerLockActive) return false;
+    if (isVideoLoading) return false;
+    if (!isPlaying) return false;
+    if (videoHeight === 0 || videoWidth === 0) return false;
+    return true;
+  }, [
+    settings.mouseMode,
+    isPointerLockPossible,
+    isPointerLockActive,
+    isVideoLoading,
+    isPlaying,
+    videoHeight,
+    videoWidth,
+  ]);
+
   return (
     <div className="grid h-full w-full grid-rows-layout">
-      <div className="min-h-[39.5px] flex flex-col">
+      <div className="flex min-h-[39.5px] flex-col">
         <div className="flex flex-col">
-          <fieldset disabled={peerConnection?.connectionState !== "connected"} className="contents">
-            <Actionbar
-              requestFullscreen={async () =>
-                videoElm.current?.requestFullscreen({
-                  navigationUI: "show",
-                })
-              }
-            />
+          <fieldset
+            disabled={peerConnection?.connectionState !== "connected"}
+            className="contents"
+          >
+            <Actionbar requestFullscreen={requestFullscreen} />
             <MacroBar />
           </fieldset>
         </div>
       </div>
 
-      <div
-        ref={containerRef}
-        className={cx("h-full overflow-hidden", {
-          "cursor-none": settings.mouseMode === "relative" && settings.isCursorHidden,
-        })}
-      >
+      <div ref={containerRef} className="h-full overflow-hidden">
         <div className="relative h-full">
           <div
             className={cx(
-              "absolute inset-0 bg-blue-50/40 opacity-80 dark:bg-slate-800/40",
+              "absolute inset-0 -z-0 bg-blue-50/40 opacity-80 dark:bg-slate-800/40",
               "[background-image:radial-gradient(theme(colors.blue.300)_0.5px,transparent_0.5px),radial-gradient(theme(colors.blue.300)_0.5px,transparent_0.5px)] dark:[background-image:radial-gradient(theme(colors.slate.700)_0.5px,transparent_0.5px),radial-gradient(theme(colors.slate.700)_0.5px,transparent_0.5px)]",
               "[background-position:0_0,10px_10px]",
               "[background-size:20px_20px]",
@@ -590,48 +682,51 @@ export default function WebRTCVideo() {
                 <div className="grid flex-grow grid-rows-bodyFooter overflow-hidden">
                   <div className="relative mx-4 my-2 flex items-center justify-center overflow-hidden">
                     <div className="relative flex h-full w-full items-center justify-center">
-                      <video
-                        ref={videoElm}
-                        autoPlay={true}
-                        controls={false}
-                        onPlaying={onVideoPlaying}
-                        onPlay={onVideoPlaying}
-                        muted={true}
-                        playsInline
-                        disablePictureInPicture
-                        controlsList="nofullscreen"
-                        className={cx(
-                          "outline-50 max-h-full max-w-full object-contain transition-all duration-1000",
-                          {
-                            "cursor-none":
-                              settings.mouseMode === "absolute" &&
-                              settings.isCursorHidden,
-                            "opacity-0":
-                              isVideoLoading ||
-                              hdmiError ||
-                              peerConnectionState !== "connected",
-                            "animate-slideUpFade border border-slate-800/30 opacity-0 shadow dark:border-slate-300/20":
-                              isPlaying,
-                          },
-                        )}
-                      />
-                      {peerConnection?.connectionState == "connected" && (
-                        <div
-                          style={{ animationDuration: "500ms" }}
-                          className="pointer-events-none absolute inset-0 flex animate-slideUpFade items-center justify-center opacity-0"
-                        >
-                          <div className="relative h-full max-h-[720px] w-full max-w-[1280px] rounded-md">
-                            <LoadingVideoOverlay show={isVideoLoading} />
-                            <HDMIErrorOverlay show={hdmiError} hdmiState={hdmiState} />
-                            <NoAutoplayPermissionsOverlay
-                              show={hasNoAutoPlayPermissions}
-                              onPlayClick={() => {
-                                videoElm.current?.play();
-                              }}
-                            />
+                      <div className="relative inline-block">
+                        {/* In relative mouse mode and under https, we enable the pointer lock, and to do so we need a bar to show the user to click on the video to enable mouse control */}
+                        <PointerLockBar show={showPointerLockBar} />
+                        <video
+                          ref={videoElm}
+                          autoPlay={true}
+                          controls={false}
+                          onPlaying={onVideoPlaying}
+                          onPlay={onVideoPlaying}
+                          muted={true}
+                          playsInline
+                          disablePictureInPicture
+                          controlsList="nofullscreen"
+                          className={cx(
+                            "z-30 max-h-full min-h-[384px] min-w-[512px] max-w-full bg-black/50 object-contain transition-all duration-1000",
+                            {
+                              "cursor-none": settings.isCursorHidden,
+                              "opacity-0":
+                                isVideoLoading ||
+                                hdmiError ||
+                                peerConnectionState !== "connected",
+                              "!opacity-60": showPointerLockBar,
+                              "animate-slideUpFade border border-slate-800/30 opacity-0 shadow dark:border-slate-300/20":
+                                isPlaying,
+                            },
+                          )}
+                        />
+                        {peerConnection?.connectionState == "connected" && (
+                          <div
+                            style={{ animationDuration: "500ms" }}
+                            className="pointer-events-none absolute inset-0 flex animate-slideUpFade items-center justify-center opacity-0"
+                          >
+                            <div className="relative h-full w-full rounded-md">
+                              <LoadingVideoOverlay show={isVideoLoading} />
+                              <HDMIErrorOverlay show={hdmiError} hdmiState={hdmiState} />
+                              <NoAutoplayPermissionsOverlay
+                                show={hasNoAutoPlayPermissions}
+                                onPlayClick={() => {
+                                  videoElm.current?.play();
+                                }}
+                              />
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </div>
                   <VirtualKeyboard />
