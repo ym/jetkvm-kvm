@@ -113,20 +113,17 @@ func rpcMountBuiltInImage(filename string) error {
 	return mountImage(imagePath)
 }
 
-func getMassStorageMode() (bool, error) {
+func getMassStorageCDROMEnabled() (bool, error) {
 	massStorageFunctionPath, err := gadget.GetPath("mass_storage_lun0")
 	if err != nil {
 		return false, fmt.Errorf("failed to get mass storage path: %w", err)
 	}
-
 	data, err := os.ReadFile(path.Join(massStorageFunctionPath, "lun.0", "cdrom"))
 	if err != nil {
 		return false, fmt.Errorf("failed to read cdrom mode: %w", err)
 	}
-
 	// Trim any whitespace characters. It has a newline at the end
 	trimmedData := strings.TrimSpace(string(data))
-
 	return trimmedData == "1", nil
 }
 
@@ -204,6 +201,11 @@ func rpcMountWithHTTP(url string, mode VirtualMediaMode) error {
 		return fmt.Errorf("failed to use http url: %w", err)
 	}
 	logger.Info().Str("url", url).Int64("size", n).Msg("using remote url")
+
+	if err := setMassStorageMode(mode == CDROM); err != nil {
+		return fmt.Errorf("failed to set mass storage mode: %w", err)
+	}
+
 	currentVirtualMediaState = &VirtualMediaState{
 		Source: HTTP,
 		Mode:   mode,
@@ -243,6 +245,11 @@ func rpcMountWithWebRTC(filename string, size int64, mode VirtualMediaMode) erro
 		Size:     size,
 	}
 	virtualMediaStateMutex.Unlock()
+
+	if err := setMassStorageMode(mode == CDROM); err != nil {
+		return fmt.Errorf("failed to set mass storage mode: %w", err)
+	}
+
 	logger.Debug().Interface("currentVirtualMediaState", currentVirtualMediaState).Msg("currentVirtualMediaState")
 	logger.Debug().Msg("Starting nbd device")
 	nbdDevice = NewNBDDevice()
@@ -278,6 +285,10 @@ func rpcMountWithStorage(filename string, mode VirtualMediaMode) error {
 	fileInfo, err := os.Stat(fullPath)
 	if err != nil {
 		return fmt.Errorf("failed to get file info: %w", err)
+	}
+
+	if err := setMassStorageMode(mode == CDROM); err != nil {
+		return fmt.Errorf("failed to set mass storage mode: %w", err)
 	}
 
 	err = setMassStorageImage(fullPath)
