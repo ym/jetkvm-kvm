@@ -29,6 +29,9 @@ jobs:
       - name: Build frontend
         run: |
           make frontend
+      - name: Install dependencies
+        run: |
+          ./.devcontainer/install-deps.sh
       - name: Build application
         run: |
           make build_dev
