@@ -152,6 +152,7 @@ func setupRouter() *gin.Engine {
 		developerModeRouter.GET("/pprof/threadcreate", gin.WrapH(pprof.Handler("threadcreate")))
 
 		logging.AttachSSEHandler(developerModeRouter)
+		nativeInstance.AttachDebugHandler(developerModeRouter)
 	}
 
 	// Protected routes (allows both password and noPassword modes)
